@@ -19,9 +19,10 @@ const KIND={SR:'Special Prosthesis',SD:'Special Drug'};
 const LABELS={bill:'sisipan: top-up tanpa dukungan tagihan',fiktif:'sisipan: pola klaim fiktif',both:'sisipan: kedua pola','fiktif-quiet':'sisipan: klaim fiktif yang dibuat tampak wajar'};
 const DRIVER=['Tagihan RS','Lama rawat','Top-up berulang','Volume top-up'];
 const FEAT_LABEL=['Tagihan RS vs harga acuan','Lama rawat vs INA-CBG sama','Top-up sama, kartu sama, 90 hari','Volume top-up RS vs sejawat'];
-const ACTIONS={login:'Masuk',login_failed:'Gagal masuk',logout:'Keluar',batch_upload:'Mengunggah batch',batch_settings:'Mengubah pengaturan',batch_delete:'Menghapus batch',review_set:'Mencatat keputusan',review_reopened:'Membuka ulang klaim',reference_price_set:'Mengubah harga acuan',reference_price_delete:'Menghapus harga acuan',export:'Ekspor CSV'};
-const ROLE={verifikator:'verifikator',supervisor:'supervisor'};
-const ROUTES=['queue','batches','refs','audit','about'];
+const ACTIONS={demo_login:'Mulai sesi juri',feedback:'Mengirim umpan balik',login:'Masuk',login_failed:'Gagal masuk',logout:'Keluar',batch_upload:'Mengunggah batch',batch_settings:'Mengubah pengaturan',batch_delete:'Menghapus batch',review_set:'Mencatat keputusan',review_reopened:'Membuka ulang klaim',reference_price_set:'Mengubah harga acuan',reference_price_delete:'Menghapus harga acuan',export:'Ekspor CSV'};
+const ROLE={verifikator:'verifikator',supervisor:'supervisor',juri:'juri · tamu'};
+const PERAN={verifikator:'Verifikator / anti-fraud BPJS','koder-rs':'Koder / casemix RS',klinisi:'Dokter / nakes','manajemen-rs':'Manajemen RS',juri:'Juri / penilai',lainnya:'Lainnya'};
+const ROUTES=['queue','batches','refs','audit','feedback','about'];
 
 const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[]};
 let X1=5,Y0=0.3,Y1=0.76;
@@ -62,7 +63,9 @@ function showLogin(msg){
   S.user=null; $('top').hidden=true; $('foot').hidden=true; showOnly('view-login');
   $('loginMsg').textContent=msg||''; $('password').value='';
   const hint=S.config&&S.config.loginHint; $('loginHint').hidden=!hint; $('loginHint').textContent=hint||'';
-  $('username').focus();
+  const judge=!!(S.config&&S.config.judgeMode);
+  $('judgeCard').hidden=!judge; $('teamLabel').hidden=!judge; $('judgeMsg').textContent='';
+  if(judge){$('guestHours').textContent=S.config.guestHours; $('judgeBtn').focus()} else $('username').focus();
 }
 $('loginForm').addEventListener('submit',async e=>{
   e.preventDefault(); const b=$('loginBtn'); b.disabled=true; $('loginMsg').textContent='';
@@ -72,16 +75,25 @@ $('loginForm').addEventListener('submit',async e=>{
   }catch(err){$('loginMsg').textContent=err.message}
   finally{b.disabled=false}
 });
+$('judgeBtn').addEventListener('click',async()=>{
+  const b=$('judgeBtn'); b.disabled=true; b.textContent='Menyiapkan data juri…'; $('judgeMsg').textContent='';
+  try{S.user=await api('POST','/api/demo-login',{},{quiet401:true}); history.replaceState(null,'','#/queue'); await enter()}
+  catch(err){$('judgeMsg').textContent=err.message}
+  finally{b.disabled=false; b.textContent='Coba sebagai juri'}
+});
 $('signOut').addEventListener('click',async()=>{
+  if(S.user&&S.user.guest&&!window.confirm('Keluar dari sesi juri? Data sesi ini tidak bisa dibuka lagi; Anda bisa memulai sesi baru kapan saja.')) return;
   try{await api('POST','/api/logout',{},{quiet401:true})}catch(_){}
   S.batch=null; S.claims=[]; S.sel=null; history.replaceState(null,'','#/queue'); showLogin('');
 });
 async function enter(){
   $('top').hidden=false; $('foot').hidden=false;
   $('whoName').textContent=S.user.name; $('whoRole').textContent=ROLE[S.user.role]||S.user.role;
-  const sup=S.user.role==='supervisor';
-  document.querySelectorAll('#nav a[data-role]').forEach(a=>{a.hidden=a.dataset.role==='supervisor'&&!sup});
-  $('refForm').hidden=!sup; $('saveSettings').hidden=!sup;
+  const sup=S.user.role==='supervisor', guest=!!S.user.guest;
+  document.querySelectorAll('#nav a[data-role]').forEach(a=>{a.hidden=a.dataset.role==='audit'&&!(sup||guest)});
+  $('refForm').hidden=!sup; $('saveSettings').hidden=!(sup||guest);
+  $('footNote').textContent=guest?`Sesi juri: data Anda terpisah dan dihapus otomatis ${when(S.user.expiresAt)}.`:'Flag adalah permintaan pemeriksaan, bukan tuduhan.';
+  loadTour();
   await loadBatches();
   route();
 }
@@ -89,11 +101,12 @@ function route(){
   if(!S.user) return;
   const asked=(location.hash||'').replace(/^#\/?/,'');
   let r=asked||'queue';
-  if(!ROUTES.includes(r)||(r==='audit'&&S.user.role!=='supervisor')) r='queue';
+  if(!ROUTES.includes(r)||(r==='audit'&&S.user.role!=='supervisor'&&!S.user.guest)) r='queue';
+  if(r==='audit') tick('audit');
   if(asked&&asked!==r) history.replaceState(null,'','#/'+r);
   S.route=r; showOnly('view-'+r);
   document.querySelectorAll('#nav a').forEach(a=>{if(a.dataset.route===r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,audit:openAudit,about:()=>{}})[r]()).catch(fail);
+  Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
 }
 window.addEventListener('hashchange',route);
 
@@ -225,7 +238,7 @@ function renderRs(){
 function renderUnsaved(){
   const b=S.batch, dirty=S.thr!==b.thresholdPct||S.k!==b.topK;
   $('unsaved').hidden=!dirty;
-  if(dirty) $('unsavedText').textContent=`Anda sedang mencoba pengaturan lain. Pengaturan tersimpan untuk batch ini: ${b.thresholdPct}% dan ${b.topK} klaim.`+(S.user.role==='supervisor'?'':' Hanya supervisor yang dapat menyimpan perubahan.');
+  if(dirty) $('unsavedText').textContent=`Anda sedang mencoba pengaturan lain. Pengaturan tersimpan untuk batch ini: ${b.thresholdPct}% dan ${b.topK} klaim.`+(S.user.role==='supervisor'||S.user.guest?'':' Hanya supervisor yang dapat menyimpan perubahan.');
 }
 function drawChart(){
   if(S.route!=='queue'||!S.claims.length) return;
@@ -301,6 +314,7 @@ document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.clo
 async function selectClaim(c,user){
   if(!c) return;
   S.sel=c; S.draft=null;
+  if(user){tick('reasons'); if(c.rank===2&&S.batch.labelled) tick('example')}
   drawChart(); renderRows(); renderWhy();
   if(user&&window.matchMedia('(max-width:980px)').matches){
     const calm=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -414,6 +428,7 @@ async function saveReview(status,note,resp){
     const b=S.batches.find(x=>x.id===S.batch.id); if(b) b.stale=true;
     update();
     toast(status?'Keputusan tersimpan: '+REVIEW[status]+'.':'Klaim dibuka ulang.');
+    if(status) tick('decide');
   }catch(e){fail(e)}
 }
 $('why').addEventListener('submit',e=>{
@@ -429,15 +444,15 @@ function update(){
   if(!S.batch) return;
   classify(); const n=counts();
   $('thrOut').textContent=S.thr+'%'; $('kOut').textContent=S.k;
-  renderHead(); renderPipe(n); renderKpis(n); renderLegend(n); renderUnsaved(); drawChart(); renderRows(); renderWhy(); renderRs();
+  renderHead(); renderPipe(n); renderKpis(n); renderLegend(n); renderUnsaved(); drawChart(); renderRows(); renderWhy(); renderRs(); renderTour();
 }
 $('thr').addEventListener('input',e=>{S.thr=+e.target.value;update()});
-$('kk').addEventListener('input',e=>{S.k=+e.target.value;update()});
+$('kk').addEventListener('input',e=>{S.k=+e.target.value;tick('capacity');update()});
 $('resetSettings').addEventListener('click',()=>{S.thr=S.batch.thresholdPct;S.k=S.batch.topK;$('thr').value=S.thr;$('kk').value=S.k;update()});
 $('saveSettings').addEventListener('click',async()=>{
   try{
     S.batch=await api('PATCH','/api/batches/'+S.batch.id,{thresholdPct:S.thr,topK:S.k});
-    S.thr=S.batch.thresholdPct; S.k=S.batch.topK; update(); toast('Pengaturan batch ini tersimpan.');
+    S.thr=S.batch.thresholdPct; S.k=S.batch.topK; update(); toast('Pengaturan batch ini tersimpan.'); tick('capacity');
   }catch(e){fail(e)}
 });
 let rz; window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(drawChart,120)});
@@ -445,7 +460,7 @@ let rz; window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(dra
 /* ---------- halaman batch ---------- */
 async function openBatches(){
   await loadBatches();
-  const sup=S.user.role==='supervisor';
+  const sup=S.user.role==='supervisor'||!!S.user.guest;
   $('batchRows').innerHTML=S.batches.map(b=>{
     const skipped=[b.noTopup?`${dots(b.noTopup)} tanpa top-up`:'',b.noRef?`${dots(b.noRef)} tanpa harga acuan`:'',b.bad?`${dots(b.bad)} tidak terbaca`:''].filter(Boolean).join(', ');
     return `<tr>
@@ -475,7 +490,7 @@ $('uploadForm').addEventListener('submit',async e=>{
   try{
     const b=await api('POST','/api/batches',fd);
     e.target.reset(); msg.textContent=`${dots(b.rowsScreened)} dari ${dots(b.rowsTotal)} baris disaring. ${b.flagged} klaim masuk antrean.`;
-    S.batch=null; await loadBatches(); await loadBatch(b.id); location.hash='#/queue';
+    tick('upload'); S.batch=null; await loadBatches(); await loadBatch(b.id); location.hash='#/queue';
   }catch(err){if(!err.auth) msg.textContent=err.message+' Tidak ada yang disimpan.'}
   finally{btn.disabled=false}
 });
@@ -530,6 +545,86 @@ async function openAudit(){
     <td class="num">${esc(a.sep||'')}</td><td class="wrap">${esc(detailText(a))}</td></tr>`).join('')
     ||'<tr><td colspan="6">Belum ada catatan.</td></tr>';
 }
+
+/* ---------- panduan juri ---------- */
+const TOUR=[
+  ['example','Buka klaim contoh di slide 11 (peringkat 2) dan bandingkan dengan deck','Buka',openExample],
+  ['reasons','Baca alasan, kontribusi skor, dan langkah berikut untuk satu klaim'],
+  ['decide','Catat keputusan, misalnya "Dokumen diminta" beserta tanggapan RS'],
+  ['capacity','Geser kapasitas verifikator dan lihat isi antrean berubah','Ke pengaturan',()=>$('kk').scrollIntoView({behavior:'smooth',block:'center'})],
+  ['rs','Lihat tingkat flag per rumah sakit (pemantauan bias)','Lihat',()=>{tick('rs');$('rsPanel').scrollIntoView({behavior:'smooth',block:'start'})}],
+  ['audit','Buka jejak audit: setiap tindakan Anda tercatat','Buka',()=>{location.hash='#/audit'}],
+  ['upload','Opsional: unggah berkas contoh E-Klaim di halaman Batch','Ke Batch',()=>{location.hash='#/batches'}],
+  ['feedback','Beri umpan balik, satu menit','Isi',()=>{location.hash='#/feedback'}]
+];
+S.tour={}; S.tourHidden=false;
+async function openExample(){
+  if(!S.batch||!S.batch.labelled){
+    const sample=S.batches.find(b=>b.labelled);
+    if(!sample){toast('Sampel sintetis sudah dihapus dari sesi ini. Mulai sesi juri baru untuk mendapatkannya lagi.',true);return}
+    await loadBatch(sample.id).catch(fail);
+  }
+  const c=S.claims.find(x=>x.rank===2); if(c) selectClaim(c,true);
+}
+const tourKey=()=>'vk-tour-'+(S.user?S.user.username:'');
+function loadTour(){
+  S.tour={}; S.tourHidden=false;
+  try{const v=JSON.parse(sessionStorage.getItem(tourKey())||'null'); if(v){S.tour=v.t||{}; S.tourHidden=!!v.h}}catch(_){}
+  renderTour();
+}
+function saveTour(){try{sessionStorage.setItem(tourKey(),JSON.stringify({t:S.tour,h:S.tourHidden}))}catch(_){}}
+function tick(id){if(!S.user||!S.user.guest||S.tour[id]) return; S.tour[id]=1; saveTour(); renderTour()}
+function renderTour(){
+  const box=$('tour'), show=!!(S.user&&S.user.guest&&S.batch);
+  box.hidden=!show; if(!show) return;
+  const done=TOUR.filter(t=>S.tour[t[0]]).length;
+  if(S.tourHidden){
+    box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri</h2><span class="prog">${done} dari ${TOUR.length} langkah · <button type="button" class="go" data-tour="show">Tampilkan</button></span></div>`;
+    return;
+  }
+  box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri: 8 langkah, sekitar 5 menit</h2>
+    <span class="prog">${done} dari ${TOUR.length} selesai · <button type="button" class="go" data-tour="hide">Sembunyikan</button></span></div>
+    <ol>${TOUR.map((t,i)=>`<li class="${S.tour[t[0]]?'done':''}"><span class="ck" aria-hidden="true">${S.tour[t[0]]?'✓':i+1}</span><span class="tx">${esc(t[1])}${t[2]?` <button type="button" class="go" data-step="${t[0]}">${esc(t[2])}</button>`:''}${S.tour[t[0]]?'<span class="sr"> (selesai)</span>':''}</span></li>`).join('')}</ol>
+    <p class="meta">Data sintetis berformat E-Klaim. Sesi ini milik Anda sendiri dan dihapus otomatis ${esc(when(S.user.expiresAt))}.</p>`;
+}
+$('tour').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  if(b.dataset.tour){S.tourHidden=b.dataset.tour==='hide'; saveTour(); renderTour(); return}
+  const t=TOUR.find(x=>x[0]===b.dataset.step); if(t&&t[3]) t[3]();
+});
+
+if('IntersectionObserver' in window){
+  new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting)&&S.route==='queue'&&S.batch) tick('rs')},{threshold:.4}).observe($('rsPanel'));
+}
+
+/* ---------- umpan balik ---------- */
+async function openFeedback(){
+  const sup=S.user.role==='supervisor';
+  if(S.user.guest&&!$('fbPeran').value) $('fbPeran').value='juri';
+  $('usageBox').hidden=!sup;
+  if(!sup) return;
+  const [u,rows]=await Promise.all([api('GET','/api/usage'),api('GET','/api/feedback')]);
+  $('usageKpis').innerHTML=[
+    [`${u.guestSessions}`,'sesi juri / tamu',`${u.guestSessions7d} dalam 7 hari terakhir · ${u.activeGuests} masih aktif`],
+    [`${u.decisions}`,'keputusan tercatat',`${u.guestDecisions} oleh tamu · ${u.uploads} unggahan · ${u.exports} ekspor`],
+    [`${u.feedback}`,'umpan balik',u.avgUseful==null?'belum ada nilai':`rata-rata kegunaan <b>${dec(u.avgUseful,1)}</b> dari 5`],
+    [`${u.distinctAccounts}`,'akun berbeda yang pernah masuk','termasuk sesi juri']
+  ].map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}<br>${k[2]}</div></div>`).join('');
+  $('fbRows').innerHTML=rows.map(f=>`<tr><td class="nw">${esc(when(f.at))}<span class="sm">${esc(f.username)}</span></td><td>${esc(PERAN[f.peran]||f.peran)}</td><td>${esc(f.institusi||'-')}</td>
+    <td class="r num">${f.useful}</td><td>${esc(f.wouldUse)}</td><td class="wrap">${esc(f.comment||'-')}</td></tr>`).join('')
+    ||'<tr><td colspan="6">Belum ada umpan balik.</td></tr>';
+}
+$('fbForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const useful=e.target.querySelector('input[name=fbUseful]:checked'), use=e.target.querySelector('input[name=fbUse]:checked');
+  const btn=$('fbBtn'); btn.disabled=true; $('fbMsg').textContent='';
+  try{
+    await api('POST','/api/feedback',{peran:$('fbPeran').value,institusi:$('fbInst').value,useful:+useful.value,wouldUse:use.value,comment:$('fbComment').value});
+    e.target.reset(); $('fbMsg').textContent='Terima kasih. Umpan balik Anda tersimpan.'; tick('feedback');
+    if(S.user.role==='supervisor') await openFeedback();
+  }catch(err){if(!err.auth) $('fbMsg').textContent=err.message}
+  finally{btn.disabled=false}
+});
 
 /* ---------- mulai ---------- */
 async function boot(){

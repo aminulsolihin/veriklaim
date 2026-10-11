@@ -17,6 +17,8 @@ and matches the pitch deck: every number the deck quotes for the synthetic sampl
 | Review | A verifikator records a decision and note on each claim. When documents are requested, the hospital's response is recorded on the same claim. Decisions are stored. |
 | Comparison | On the synthetic sample, the page shows what the queue catches against a random sample of the same size (13 vs 2.8 of 14 at the default settings). |
 | Bias monitoring | Flag rate per hospital, with confirmed, cleared and awaiting-documents counts. |
+| Judge mode | A "Coba sebagai juri" button on the sign-in page. Each visitor gets a private, already-scored copy of the synthetic sample, an 8-step guided checklist, and their own audit trail. Guests cannot change reference prices or see anyone else's data, and are removed after 24 hours. |
+| Feedback and usage | A one-minute feedback form for anyone who tries the app. A supervisor sees the answers, exports them as CSV, and sees usage counts from the audit log (judge sessions, decisions, uploads). |
 | Roles | `verifikator` reviews and uploads. `supervisor` also saves thresholds, edits reference prices, deletes batches and reads the audit log. |
 | Audit log | Sign-ins, uploads, threshold changes, decisions and hospital responses, reference-price edits and exports. |
 | Export | The queue with scores, drivers and decisions, as CSV. |
@@ -80,6 +82,28 @@ tokens, so changing it signs everyone out and changes the tokens of later upload
 
 Before a judging session, open the address once a minute or two ahead so the server is awake.
 
+### Keep it awake during the selection period
+
+Judges may open the link at any hour, and a sleeping free server takes up to a minute to wake.
+Ping it every 10 minutes so it stays awake:
+
+1. At https://cron-job.org (free) create a cron job for `https://<service-name>.onrender.com/healthz`,
+   every 10 minutes.
+2. That is the only free web service in the Render workspace, so it fits Render's 750 free hours a
+   month (a 31-day month is 744 hours). A second free service in the same workspace would not fit.
+
+`/healthz` does not touch the database, so the pings do not keep Neon's compute running and use
+none of its 100 free compute hours. Neon only wakes when someone actually uses the app.
+`/readyz` checks the database too, for manual checks.
+
+### Before you submit the link
+
+- Open the address in a private window, choose **Coba sebagai juri**, and walk the 8 checklist steps.
+- Set `LOGIN_HINT` to a short line for judges, or leave it empty: judges do not need the team passwords.
+- Change the two team passwords from anything you have shared before.
+- Check `/healthz` from the cron service shows successful runs.
+- After the selection, set `JUDGE_MODE=0` to switch the button off.
+
 ### Route B: Firebase Hosting in front of Cloud Run
 
 Use this only if you want a `web.app` address. It needs the Blaze plan (a linked billing account).
@@ -119,6 +143,11 @@ SQLite file, which only survives restarts on a host with a persistent disk.
 | `MAX_UPLOAD_MB` | `8` | Largest file accepted. |
 | `MAX_CLAIMS` | `2000` | Most top-up claims screened per file. |
 | `SEED_SAMPLE` | `1` | Load the synthetic sample when the database has no batches. |
+| `JUDGE_MODE` | `1` | Show "Coba sebagai juri" and allow guest sessions. `0` turns it off. |
+| `GUEST_HOURS` | `24` | How long a guest session and its data last. |
+| `MAX_GUESTS` | `300` | Most guest sessions alive at once. |
+| `GUEST_LOGINS_PER_IP_HOUR` | `10` | New guest sessions per network per hour. |
+| `GUEST_MAX_BATCHES` | `5` | Batches a guest may hold. |
 | `SESSION_COOKIE` | `vk_session` | Name of the session cookie. Set `__session` behind Firebase Hosting. |
 
 ## Privacy and data
@@ -132,6 +161,8 @@ SQLite file, which only survives restarts on a host with a persistent disk.
 - Passwords are stored as scrypt hashes. Sessions are signed, HttpOnly, SameSite=Lax
   cookies. Changes need a request header that other sites cannot send.
 - `robots.txt` and a `noindex` header keep the site out of search engines.
+- Judge-mode guests have no password and no personal details. The feedback form asks for a role,
+  an optional institution and a comment, and asks people not to write patient data.
 
 This is a prototype: there are two shared accounts and no password reset, per-user accounts
 or session revocation. Add those before any real use.

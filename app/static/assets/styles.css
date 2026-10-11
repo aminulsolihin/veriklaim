@@ -222,3 +222,27 @@ td.wrap{overflow-wrap:anywhere;min-width:200px}
 .sbar.rate{margin:5px 0 0;width:120px}
 .review label .s{font-weight:400;color:var(--ink-3)}
 #rsRows .tag{font-size:11.5px;padding:1px 8px;margin-left:4px}
+/* judge mode */
+.card.judge{border:2px solid var(--pill);background:var(--accent-soft);gap:10px}
+.card.judge h2{font-size:18px;font-weight:600}
+.card.judge p{font-size:14px;color:var(--ink-2)}
+.team-label{margin-top:8px}
+.tour{padding:16px 18px;display:flex;flex-direction:column;gap:10px;border-color:var(--pill)}
+.tour .thead{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between}
+.tour h2{font-size:18px;font-weight:600}
+.tour .prog{font-size:13px;color:var(--ink-2)}
+.tour ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 20px}
+.tour li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.4;color:var(--ink)}
+.tour li .ck{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid var(--rule-strong);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--ink-3)}
+.tour li.done .ck{background:var(--pill);border-color:var(--pill);color:#fff}
+.tour li.done .tx{color:var(--ink-2)}
+.tour li .go{font:inherit;font-size:12.5px;font-weight:600;color:var(--accent);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;margin-left:6px}
+.tour .meta{font-size:12.5px;color:var(--ink-3)}
+@media (max-width:820px){.tour ol{grid-template-columns:1fr}}
+.scale{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.scale legend{font-size:14px;font-weight:500;margin-bottom:6px}
+.scale legend .s{display:block;font-weight:400;font-size:12.5px;color:var(--ink-3)}
+.scale-row{display:flex;flex-wrap:wrap;gap:8px}
+.scale-row label{display:inline-flex;gap:6px;align-items:center;border:1.5px solid var(--rule-strong);border-radius:10px;padding:6px 14px;font-size:14px;cursor:pointer;background:var(--surface)}
+.scale-row label:has(input:checked){border-color:var(--pill);background:var(--accent-soft)}
+.scale-row input{accent-color:var(--pill);margin:0}

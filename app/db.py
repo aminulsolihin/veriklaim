@@ -76,6 +76,8 @@ class Batch(Base):
     top_k: Mapped[int] = mapped_column(Integer, default=12)
     base_score: Mapped[float] = mapped_column(Float)
     labelled: Mapped[bool] = mapped_column(Boolean, default=False)  # synthetic sample with injected-pattern labels
+    # None: a team batch. A username: the private batch of one judge-mode guest.
+    owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
 class Claim(Base):
@@ -126,6 +128,20 @@ class Claim(Base):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Feedback(Base):
+    """What people who tried the app said about it: the evidence of use a later MVP claim needs."""
+    __tablename__ = "feedback"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    username: Mapped[str] = mapped_column(String(64))
+    account_role: Mapped[str] = mapped_column(String(20), default="")
+    peran: Mapped[str] = mapped_column(String(40))  # how the person describes their own work
+    institusi: Mapped[str] = mapped_column(String(120), default="")
+    useful: Mapped[int] = mapped_column(Integer)  # 1 to 5
+    would_use: Mapped[str] = mapped_column(String(10), default="")  # ya / mungkin / tidak
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -141,10 +157,13 @@ class AuditLog(Base):
 def add_missing_columns() -> None:
     """create_all does not add columns to an existing table. Add the few columns that later
     versions introduced, so a database made by an earlier version keeps working."""
-    added = {"claims": {"rs_response": "TEXT DEFAULT ''"}}
+    added = {"claims": {"rs_response": "TEXT DEFAULT ''"}, "batches": {"owner": "VARCHAR(64)"}}
     insp = inspect(engine)
     with engine.begin() as conn:
+        tables = set(insp.get_table_names())
         for table, cols in added.items():
+            if table not in tables:
+                continue
             have = {c["name"] for c in insp.get_columns(table)}
             for name, ddl in cols.items():
                 if name not in have:

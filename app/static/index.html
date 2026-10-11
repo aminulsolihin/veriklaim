@@ -25,7 +25,8 @@
     <a href="#/queue" data-route="queue">Antrean</a>
     <a href="#/batches" data-route="batches">Batch</a>
     <a href="#/refs" data-route="refs">Harga acuan</a>
-    <a href="#/audit" data-route="audit" data-role="supervisor">Jejak audit</a>
+    <a href="#/audit" data-route="audit" data-role="audit">Jejak audit</a>
+    <a href="#/feedback" data-route="feedback">Umpan balik</a>
     <a href="#/about" data-route="about">Tentang</a>
   </nav>
   <div class="who">
@@ -46,6 +47,13 @@
     <p class="eyebrow">Prototype · Healthkathon 2026 · Tim Bill Buster</p>
     <h1 class="display">VeriKlaim</h1>
     <p class="sub">Periksa tagihan. Temukan pola. Jelaskan alasannya. Penyaringan top-up obat dan alkes pada klaim INA-CBG, langsung dari berkas E-Klaim.</p>
+    <div class="card judge" id="judgeCard" hidden>
+      <h2>Untuk juri dan penilai</h2>
+      <p>Coba seluruh alur tanpa akun. Anda mendapat salinan data sintetis sendiri: keputusan dan unggahan Anda tidak terlihat orang lain dan dihapus otomatis setelah <span id="guestHours">24</span> jam.</p>
+      <button type="button" class="btn" id="judgeBtn">Coba sebagai juri</button>
+      <p class="msg err" id="judgeMsg" role="alert"></p>
+    </div>
+    <p class="eyebrow team-label" id="teamLabel" hidden>Masuk tim</p>
     <form id="loginForm" class="card" autocomplete="on">
       <div class="field">
         <label for="username">Nama pengguna</label>
@@ -59,7 +67,7 @@
       <p class="msg err" id="loginMsg" role="alert"></p>
     </form>
     <p class="hint" id="loginHint" hidden></p>
-    <p class="hint">Hanya data sintetis. Dua peran: verifikator mencatat keputusan; supervisor juga mengatur kapasitas antrean, mengubah harga acuan, dan membaca jejak audit.</p>
+    <p class="hint">Hanya data sintetis. Peran tim: verifikator mencatat keputusan; supervisor juga mengatur kapasitas antrean, mengubah harga acuan, membaca jejak audit, dan melihat umpan balik.</p>
   </section>
 
   <!-- antrean -->
@@ -83,6 +91,7 @@
     </div>
 
     <div id="queueBody" class="stack">
+      <section class="panel tour" id="tour" hidden aria-labelledby="tourTitle"></section>
       <p class="notice" id="labelNote" hidden></p>
 
       <ol class="pipe" id="pipe" aria-label="Tahap penyaringan"></ol>
@@ -138,7 +147,7 @@
         </section>
       </div>
 
-      <section class="panel">
+      <section class="panel" id="rsPanel">
         <header><h2>Tingkat flag per rumah sakit</h2></header>
         <p class="lede">Pemantauan bias: rumah sakit yang jauh lebih sering masuk antrean dibanding rata-rata perlu dilihat ulang, termasuk kemungkinan penyebab yang wajar seperti pusat rujukan atau harga beli di bawah katalog.</p>
         <div class="tblwrap">
@@ -258,6 +267,76 @@
     </section>
   </section>
 
+  <!-- umpan balik -->
+  <section id="view-feedback" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Umpan balik</p>
+      <h1>Apakah VeriKlaim berguna untuk pekerjaan Anda?</h1>
+      <p class="sub">Satu menit. Jawaban dipakai tim Bill Buster untuk memperbaiki prototype. Jangan tulis data pribadi pasien.</p>
+    </div></div>
+
+    <form class="panel pad" id="fbForm">
+      <div class="formgrid">
+        <div class="field">
+          <label for="fbPeran">Peran Anda</label>
+          <select id="fbPeran" required>
+            <option value="">Pilih</option>
+            <option value="verifikator">Verifikator / anti-fraud BPJS Kesehatan</option>
+            <option value="koder-rs">Koder atau casemix rumah sakit</option>
+            <option value="klinisi">Dokter atau tenaga kesehatan</option>
+            <option value="manajemen-rs">Manajemen rumah sakit</option>
+            <option value="juri">Juri atau penilai</option>
+            <option value="lainnya">Lainnya</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fbInst">Institusi (opsional)</label>
+          <input type="text" id="fbInst" maxlength="120" placeholder="Boleh dikosongkan">
+        </div>
+      </div>
+      <fieldset class="scale">
+        <legend>Seberapa berguna untuk memilih klaim yang perlu diperiksa? <span class="s">1 = tidak berguna, 5 = sangat berguna</span></legend>
+        <div class="scale-row">
+          <label><input type="radio" name="fbUseful" value="1" required> 1</label>
+          <label><input type="radio" name="fbUseful" value="2"> 2</label>
+          <label><input type="radio" name="fbUseful" value="3"> 3</label>
+          <label><input type="radio" name="fbUseful" value="4"> 4</label>
+          <label><input type="radio" name="fbUseful" value="5"> 5</label>
+        </div>
+      </fieldset>
+      <fieldset class="scale">
+        <legend>Bila tersedia dengan data nyata, apakah Anda akan memakainya?</legend>
+        <div class="scale-row">
+          <label><input type="radio" name="fbUse" value="ya" required> Ya</label>
+          <label><input type="radio" name="fbUse" value="mungkin"> Mungkin</label>
+          <label><input type="radio" name="fbUse" value="tidak"> Tidak</label>
+        </div>
+      </fieldset>
+      <div class="field">
+        <label for="fbComment">Apa yang paling perlu diperbaiki? (opsional)</label>
+        <textarea id="fbComment" maxlength="1500" placeholder="Misalnya: alasan yang kurang jelas, data yang belum ada, alur yang berbeda dari praktik"></textarea>
+      </div>
+      <div class="btnrow"><button type="submit" class="btn" id="fbBtn">Kirim umpan balik</button></div>
+      <p class="msg" id="fbMsg" role="status"></p>
+    </form>
+
+    <div id="usageBox" class="stack" hidden>
+      <section class="kpis" id="usageKpis" aria-label="Penggunaan"></section>
+      <section class="panel">
+        <header>
+          <h2>Umpan balik yang masuk</h2>
+          <a class="btn ghost small" href="/api/feedback.csv" download>Ekspor CSV</a>
+        </header>
+        <div class="tblwrap">
+          <table>
+            <thead><tr><th>Waktu</th><th>Peran</th><th>Institusi</th><th class="r">Kegunaan</th><th>Akan memakai</th><th>Komentar</th></tr></thead>
+            <tbody id="fbRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
   <!-- tentang -->
   <section id="view-about" class="stack" hidden>
     <div class="mast"><div>
@@ -278,13 +357,14 @@
       <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas.</dd></div>
       <div><dt>Data sintetis</dt><dd>Empat belas dari 80 klaim disisipi pola agar halaman bisa menghitung apa yang ditangkap tiap lapisan. Polanya lebih bersih daripada klaim nyata, jadi angka ini menunjukkan logika bekerja, bukan perkiraan kinerja. Satu klaim fiktif sengaja dibuat tampak wajar pada keempat fitur dan memang tidak tertangkap.</dd></div>
       <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan.</dd></div>
+      <div><dt>Mode juri</dt><dd>Tombol "Coba sebagai juri" membuat sesi tamu tanpa kata sandi dengan salinan data sintetis sendiri. Tamu dapat memeriksa, memutuskan, mengatur kapasitas, mengunggah berkas, dan melihat jejak auditnya sendiri; tamu tidak dapat mengubah harga acuan atau melihat data orang lain. Sesi dan datanya dihapus otomatis.</dd></div>
       <div><dt>Cakupan</dt><dd>Kategori 2, Efisiensi Risiko pada Fasilitas Kesehatan: Manipulasi Obat &amp; Alkes serta Phantom &amp; Repeat Billing, mengacu pada Panduan Peserta Healthkathon 2026 dan Permenkes No. 16/2019.</dd></div>
     </dl>
   </section>
 
   <footer class="foot" id="foot" hidden>
     <span>Prototype VeriKlaim · Tim Bill Buster · Healthkathon 2026</span>
-    <span>Flag adalah permintaan pemeriksaan, bukan tuduhan.</span>
+    <span id="footNote">Flag adalah permintaan pemeriksaan, bukan tuduhan.</span>
   </footer>
 </main>
 

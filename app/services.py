@@ -4,10 +4,11 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from datetime import timedelta
 from typing import Optional
 
 import numpy as np
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
 from . import eklaim, scoring
@@ -48,7 +49,7 @@ def reference_map(db: Session) -> dict[str, dict]:
 
 
 def ingest(db: Session, text: str, *, name: str, filename: str, user: Optional[User],
-           labels: Optional[dict] = None) -> Batch:
+           labels: Optional[dict] = None, owner: Optional[str] = None) -> Batch:
     """Parse, screen and store one E-Klaim file. Raises eklaim.EklaimError with a message for the user."""
     parsed = eklaim.parse_eklaim(text, reference_map(db), card_token)
     rows = parsed["rows"]
@@ -67,6 +68,7 @@ def ingest(db: Session, text: str, *, name: str, filename: str, user: Optional[U
         rows_total=parsed["total"], rows_screened=len(rows), skipped_no_topup=parsed["no_topup"],
         skipped_no_ref=parsed["no_ref"], skipped_bad=parsed["bad"], truncated=truncated,
         threshold_pct=100, top_k=scoring.default_top_k(len(rows)), base_score=model.base, labelled=bool(labels),
+        owner=owner,
     )
     db.add(batch)
     db.flush()
@@ -127,8 +129,80 @@ def seed(db: Session) -> None:
         db.add_all([ReferencePrice(**r) for r in DEFAULT_REFERENCE_PRICES])
     db.commit()
 
-    if settings.seed_sample and db.scalar(select(func.count()).select_from(Batch)) == 0:
+    team_batches = db.scalar(select(func.count()).select_from(Batch).where(Batch.owner.is_(None)))
+    if settings.seed_sample and team_batches == 0:
+        clone_batch(db, _template_batch(db), owner=None, uploaded_by="system")
+        db.commit()
+    if settings.judge_mode:
+        _template_batch(db)
+        purge_guests(db)
+
+
+# ---------- judge mode ----------
+
+GUEST_ROLE = "juri"
+SAMPLE_NAME = "Sampel sintetis (80 klaim)"
+SAMPLE_FILE = "veriklaim-sample-eklaim.txt"
+_REVIEW_FIELDS = {"review_status", "review_note", "reviewed_by", "reviewed_at", "rs_response"}
+
+
+def _template_batch(db: Session) -> Batch:
+    """The scored synthetic sample that guests get a copy of. Kept as a hidden batch owned by
+    'system:template', so team members deleting their own sample does not affect judge mode."""
+    batch = db.scalar(select(Batch).where(Batch.owner == "system:template"))
+    if batch is None:
         text = (settings.data_dir / "sample-eklaim.txt").read_text(encoding="utf-8")
         labels = json.loads((settings.data_dir / "sample-labels.json").read_text(encoding="utf-8"))
-        ingest(db, text, name="Sampel sintetis (80 klaim)", filename="veriklaim-sample-eklaim.txt",
-               user=None, labels=labels)
+        batch = ingest(db, text, name=SAMPLE_NAME, filename=SAMPLE_FILE, user=None, labels=labels,
+                       owner="system:template")
+    return batch
+
+
+def clone_batch(db: Session, source: Batch, *, owner: str, uploaded_by: str) -> Batch:
+    """Copy a scored batch without re-running the model, leaving out every review decision."""
+    cols = [c.key for c in sa_inspect(Batch).mapper.column_attrs if c.key not in ("id", "owner", "uploaded_by", "uploaded_at")]
+    batch = Batch(**{k: getattr(source, k) for k in cols}, owner=owner, uploaded_by=uploaded_by)
+    db.add(batch)
+    db.flush()
+    ccols = [c.key for c in sa_inspect(Claim).mapper.column_attrs if c.key not in {"id", "batch_id"} | _REVIEW_FIELDS]
+    claims = db.scalars(select(Claim).where(Claim.batch_id == source.id)).all()
+    db.add_all([Claim(batch_id=batch.id, **{k: getattr(c, k) for k in ccols}) for c in claims])
+    return batch
+
+
+def create_guest(db: Session) -> User:
+    """A judge-mode visitor: an account without a password and a private copy of the sample."""
+    template = _template_batch(db)
+    username = "juri-" + secrets.token_hex(3)
+    while db.scalar(select(User.id).where(User.username == username)) is not None:
+        username = "juri-" + secrets.token_hex(3)
+    user = User(username=username, name="Juri (tamu)", role=GUEST_ROLE, password_hash="!")  # no password can match
+    db.add(user)
+    db.flush()
+    batch = clone_batch(db, template, owner=username, uploaded_by="system")
+    audit(db, user, "demo_login", batch_id=batch.id)
+    db.commit()
+    return user
+
+
+def guest_expiry(user: User):
+    created = user.created_at if user.created_at.tzinfo else user.created_at.replace(tzinfo=utcnow().tzinfo)
+    return created + timedelta(hours=settings.guest_hours)
+
+
+def purge_guests(db: Session) -> int:
+    """Remove judge-mode accounts older than GUEST_HOURS with their batches. The audit log and the
+    feedback they left are kept."""
+    cutoff = utcnow() - timedelta(hours=settings.guest_hours)
+    old = db.scalars(select(User).where(User.role == GUEST_ROLE, User.created_at < cutoff)).all()
+    for user in old:
+        for batch in db.scalars(select(Batch).where(Batch.owner == user.username)).all():
+            delete_batch(db, batch)
+        db.delete(user)
+    if old:
+        db.commit()
+    return len(old)
+
+
+def count_guests(db: Session) -> int:
+    return db.scalar(select(func.count()).select_from(User).where(User.role == GUEST_ROLE)) or 0

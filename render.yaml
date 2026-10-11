@@ -21,3 +21,7 @@ services:
         sync: false
       - key: LOGIN_HINT
         sync: false
+      - key: JUDGE_MODE
+        value: "1"
+      - key: GUEST_HOURS
+        value: "24"
