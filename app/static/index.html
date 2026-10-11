@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VeriKlaim · Penyaringan Klaim</title>
+<meta name="description" content="Prototype penyaringan klaim top-up obat dan alkes pada berkas E-Klaim INA-CBG: aturan tagihan, lapisan anomali, alasan per klaim, dan alur keputusan verifikator yang tersimpan.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/js/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Langsung ke isi</a>
+
+<header class="top" id="top" hidden>
+  <a class="brand" href="#/queue">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 L29 16 L16 29 L3 16 Z" fill="#fdbd00" stroke="#17a068" stroke-width="4" stroke-linejoin="round"/></svg>
+    VeriKlaim
+  </a>
+  <nav id="nav" aria-label="Bagian">
+    <a href="#/queue" data-route="queue">Antrean</a>
+    <a href="#/batches" data-route="batches">Batch</a>
+    <a href="#/refs" data-route="refs">Harga acuan</a>
+    <a href="#/audit" data-route="audit" data-role="supervisor">Jejak audit</a>
+    <a href="#/about" data-route="about">Tentang</a>
+  </nav>
+  <div class="who">
+    <span><b id="whoName"></b> <span class="role" id="whoRole"></span></span>
+    <button type="button" class="btn ghost small" id="signOut">Keluar</button>
+  </div>
+</header>
+
+<main id="main" class="page">
+
+  <section id="boot" class="boot">
+    <p>Memuat VeriKlaim.</p>
+    <button type="button" class="btn" id="bootRetry" hidden>Coba lagi</button>
+  </section>
+
+  <!-- masuk -->
+  <section id="view-login" class="login" hidden>
+    <p class="eyebrow">Prototype · Healthkathon 2026 · Tim Bill Buster</p>
+    <h1 class="display">VeriKlaim</h1>
+    <p class="sub">Periksa tagihan. Temukan pola. Jelaskan alasannya. Penyaringan top-up obat dan alkes pada klaim INA-CBG, langsung dari berkas E-Klaim.</p>
+    <form id="loginForm" class="card" autocomplete="on">
+      <div class="field">
+        <label for="username">Nama pengguna</label>
+        <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
+      </div>
+      <div class="field">
+        <label for="password">Kata sandi</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+      </div>
+      <button type="submit" class="btn" id="loginBtn">Masuk</button>
+      <p class="msg err" id="loginMsg" role="alert"></p>
+    </form>
+    <p class="hint" id="loginHint" hidden></p>
+    <p class="hint">Hanya data sintetis. Dua peran: verifikator mencatat keputusan; supervisor juga mengatur kapasitas antrean, mengubah harga acuan, dan membaca jejak audit.</p>
+  </section>
+
+  <!-- antrean -->
+  <section id="view-queue" class="stack" hidden>
+    <div class="mast">
+      <div>
+        <p class="eyebrow">Antrean pemeriksaan</p>
+        <h1 id="batchTitle">Antrean pemeriksaan</h1>
+        <p class="databar" id="databar"></p>
+      </div>
+      <div class="field pick">
+        <label for="batchSel">Batch</label>
+        <select id="batchSel"></select>
+      </div>
+    </div>
+
+    <div class="empty" id="queueEmpty" hidden>
+      <h2>Belum ada batch</h2>
+      <p>Unggah berkas TXT E-Klaim untuk mulai menyaring.</p>
+      <a class="btn" href="#/batches">Ke halaman Batch</a>
+    </div>
+
+    <div id="queueBody" class="stack">
+      <p class="notice" id="labelNote" hidden></p>
+
+      <ol class="pipe" id="pipe" aria-label="Tahap penyaringan"></ol>
+
+      <section class="ctl" aria-label="Pengaturan">
+        <div class="field">
+          <label for="thr"><b>Aturan tagihan.</b> Tandai klaim yang tagihan rumah sakitnya (TARIF_RS) di bawah <output id="thrOut" for="thr">100%</output> harga acuan item top-up.</label>
+          <input type="range" id="thr" min="60" max="200" step="10" value="100">
+        </div>
+        <div class="field">
+          <label for="kk"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kOut" for="kk">12</output> klaim paling tidak biasa ke antrean.</label>
+          <input type="range" id="kk" min="4" max="24" step="1" value="12">
+        </div>
+      </section>
+      <div class="unsaved" id="unsaved" hidden>
+        <span id="unsavedText"></span>
+        <span class="btnrow">
+          <button type="button" class="btn small" id="saveSettings" hidden>Simpan untuk semua</button>
+          <button type="button" class="btn ghost small" id="resetSettings">Kembalikan</button>
+        </span>
+      </div>
+
+      <section class="kpis" id="kpis" aria-label="Ringkasan penyaringan"></section>
+
+      <section class="panel">
+        <header><h2>Dua pemeriksaan untuk setiap klaim ber-top-up</h2></header>
+        <p class="lede">Setiap tanda adalah satu klaim dengan top-up Special Drug atau Special Prosthesis. Di kiri garis tegak, seluruh tagihan rumah sakit lebih kecil dari harga acuan barang yang diklaim. Di atas garis mendatar, klaim tidak biasa pada lama rawat, top-up berulang, atau volume, walaupun tagihannya tampak wajar.</p>
+        <div class="legend" id="legend"></div>
+        <div class="chart" id="chart"><div class="tip" id="tip" hidden></div></div>
+      </section>
+
+      <div class="work">
+        <section class="panel why" id="why"></section>
+        <section class="panel queue">
+          <header>
+            <h2>Antrean</h2>
+            <div class="toolbar">
+              <div class="seg" role="group" aria-label="Baris yang ditampilkan">
+                <button type="button" data-view="flagged" aria-pressed="true">Di antrean</button>
+                <button type="button" data-view="todo" aria-pressed="false">Belum diperiksa</button>
+                <button type="button" data-view="all" aria-pressed="false">Semua klaim</button>
+              </div>
+              <a class="btn ghost small" id="exportCsv" href="#" download>Ekspor CSV</a>
+            </div>
+          </header>
+          <p class="lede" id="queueLede"></p>
+          <div class="tblwrap tall">
+            <table>
+              <thead><tr><th>Klaim (SEP)</th><th>Top-up</th><th class="r">Tagihan ÷ acuan</th><th class="r">Skor</th><th>Hasil · keputusan</th><th>Faktor utama</th></tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <header><h2>Tingkat flag per rumah sakit</h2></header>
+        <p class="lede">Pemantauan bias: rumah sakit yang jauh lebih sering masuk antrean dibanding rata-rata perlu dilihat ulang, termasuk kemungkinan penyebab yang wajar seperti pusat rujukan atau harga beli di bawah katalog.</p>
+        <div class="tblwrap">
+          <table>
+            <thead><tr><th>Rumah sakit</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
+            <tbody id="rsRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <!-- batch -->
+  <section id="view-batches" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Batch</p>
+      <h1>Berkas E-Klaim</h1>
+      <p class="sub">Setiap unggahan dibaca dan diskor di server, lalu disimpan sebagai satu batch dengan antreannya sendiri.</p>
+    </div></div>
+
+    <form class="panel pad" id="uploadForm">
+      <h2>Saring berkas baru</h2>
+      <p class="warn">Unggah hanya berkas sintetis, atau berkas anonim dengan izin resmi. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.</p>
+      <div class="formgrid">
+        <div class="field">
+          <label for="upFile">Ekspor TXT biasa dari E-Klaim</label>
+          <input type="file" id="upFile" accept=".txt,text/plain" required>
+        </div>
+        <div class="field">
+          <label for="upName">Nama batch (opsional)</label>
+          <input type="text" id="upName" maxlength="160" placeholder="Kelompok RS, periode">
+        </div>
+      </div>
+      <div class="btnrow">
+        <button type="submit" class="btn" id="upBtn">Unggah dan saring</button>
+        <a class="btn ghost" href="/assets/sample/veriklaim-sample-eklaim.txt" download>Unduh berkas contoh</a>
+      </div>
+      <p class="msg" id="upMsg" role="status"></p>
+    </form>
+
+    <section class="panel">
+      <header><h2>Batch tersimpan</h2></header>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Batch</th><th>Diunggah</th><th>Baris</th><th>Antrean</th><th></th></tr></thead>
+          <tbody id="batchRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- harga acuan -->
+  <section id="view-refs" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Harga acuan</p>
+      <h1>Item top-up dan harga acuannya</h1>
+      <p class="sub">Klaim disaring bila kode Special CMG-nya punya harga acuan di sini. Perubahan berlaku untuk berkas yang diunggah sesudahnya; batch tersimpan tetap memakai harga saat disaring. Tanggal pembaruan tercatat agar harga usang mudah terlihat.</p>
+    </div></div>
+
+    <p class="notice"><b>Harga contoh.</b> Harga bawaan prototype ini bersifat ilustratif. Pada penerapan, tabel ini diisi dari e-Katalog LKPP dan e-Fornas Kemenkes.</p>
+
+    <section class="panel">
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Special CMG</th><th>Item</th><th>Jenis</th><th class="r">Harga acuan</th><th>Sumber</th><th>Diperbarui</th><th></th></tr></thead>
+          <tbody id="refRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <form class="panel pad" id="refForm" hidden>
+      <h2 id="refFormTitle">Tambah atau ubah harga acuan</h2>
+      <div class="formgrid four">
+        <div class="field">
+          <label for="refCode">Kode Special CMG</label>
+          <input type="text" id="refCode" required maxlength="4" pattern="[A-Za-z]{2}[0-9]{2}" placeholder="RR04" autocapitalize="characters" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="refKind">Jenis</label>
+          <select id="refKind"><option value="SR">Special Prosthesis (alkes)</option><option value="SD">Special Drug (obat)</option></select>
+        </div>
+        <div class="field">
+          <label for="refPrice">Harga acuan (Rp)</label>
+          <input type="number" id="refPrice" required min="1" step="1" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label for="refSource">Sumber</label>
+          <input type="text" id="refSource" maxlength="120" placeholder="e-Katalog LKPP, tanggal">
+        </div>
+      </div>
+      <div class="field">
+        <label for="refDesc">Item</label>
+        <input type="text" id="refDesc" required minlength="2" maxlength="120" placeholder="Hip implant / knee implant">
+      </div>
+      <div class="btnrow">
+        <button type="submit" class="btn">Simpan harga acuan</button>
+        <button type="reset" class="btn ghost">Kosongkan</button>
+      </div>
+      <p class="msg" id="refMsg" role="status"></p>
+    </form>
+  </section>
+
+  <!-- jejak audit -->
+  <section id="view-audit" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Jejak audit</p>
+      <h1>Siapa melakukan apa, dan kapan</h1>
+      <p class="sub">Masuk, unggahan, perubahan pengaturan, keputusan, tanggapan RS, perubahan harga acuan, dan ekspor. Terbaru di atas.</p>
+    </div></div>
+    <section class="panel">
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Waktu</th><th>Pengguna</th><th>Tindakan</th><th>Batch</th><th>SEP</th><th>Rincian</th></tr></thead>
+          <tbody id="auditRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- tentang -->
+  <section id="view-about" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Tentang</p>
+      <h1>Apa yang ditunjukkan prototype ini, dan apa yang belum</h1>
+    </div></div>
+    <dl class="notes">
+      <div><dt>Format masukan</dt><dd>TXT berpemisah tab yang diekspor E-Klaim, dengan susunan kolom <span class="num">pull_claim</span> pada Petunjuk Teknis E-Klaim 5.1.1. Kolom dicocokkan berdasarkan nama judul, jadi kolom tambahan dari versi lain diabaikan. TXT terenkripsi belum didukung.</dd></div>
+      <div><dt>Isi satu baris E-Klaim</dt><dd>Satu baris per SEP, dibayar sebagai paket INA-CBG. Tidak ada harga per item obat atau alat. Obat dan alkes dibayar terpisah hanya sebagai top-up Special Drug dan Special Prosthesis, sehingga klaim itulah yang disaring.</dd></div>
+      <div><dt>Aturan tagihan (tahap 2)</dt><dd>TARIF_RS, tagihan rumah sakit untuk episode itu, dibagi harga acuan item top-up. Tagihan yang lebih kecil dari harga implan atau obat yang diklaim tidak mungkin memuat barang tersebut. Siapa pun bisa menghitung ulang aturan ini dari dua kolom E-Klaim dan satu harga acuan.</dd></div>
+      <div><dt>Lapisan anomali (tahap 3)</dt><dd>Isolation Forest (scikit-learn) dengan 200 pohon, dilatih di server untuk setiap batch, atas empat fitur dari berkas: tagihan dibanding harga acuan, lama rawat dibanding median INA-CBG yang sama, klaim lain dengan top-up yang sama pada kartu yang sama dalam 90 hari, dan jumlah top-up rumah sakit dibanding rumah sakit lain. Dipilih karena tidak memerlukan label fraud.</dd></div>
+      <div><dt>Alasan (tahap 4)</dt><dd>Nilai Shapley eksak, besaran yang diperkirakan SHAP. Dengan empat fitur, ke-16 kombinasi dihitung langsung, sehingga jumlah batang selalu sama dengan selisih skor klaim dari skor rata-rata.</dd></div>
+      <div><dt>Panjang antrean</dt><dd>Antrean berisi semua klaim yang ditandai aturan tagihan, ditambah sejumlah klaim teratas dari lapisan anomali. Jumlah itu diatur supervisor sesuai kapasitas verifikator, bukan ambang skor yang dipilih sembarangan.</dd></div>
+      <div><dt>Alur keputusan</dt><dd>Verifikator mencatat keputusan dan catatan untuk tiap klaim. Bila dokumen diminta, tanggapan rumah sakit dicatat pada klaim yang sama. Semua perubahan masuk jejak audit. Persentase flag yang dikonfirmasi adalah ukuran presisi yang disebut dalam proposal.</dd></div>
+      <div><dt>Arti sebuah flag</dt><dd>Flag mengirim klaim ke verifikator manusia beserta alasannya. Flag bukan temuan fraud. Klaim wajar juga bisa masuk antrean, misalnya dua penggantian sendi pada satu pasien berjarak sepuluh minggu di data contoh.</dd></div>
+      <div><dt>Pemantauan bias</dt><dd>Tingkat flag ditampilkan per rumah sakit di bawah antrean. Rumah sakit yang membeli di bawah harga katalog, atau pusat rujukan dengan operasi bertahap, bisa tampak tidak biasa tanpa berbuat curang.</dd></div>
+      <div><dt>Privasi (UU PDP)</dt><dd>NAMA_PASIEN, MRN, dan BIRTH_DATE tidak pernah dibaca. NOKARTU diganti token satu arah sebelum disimpan, dan berkas mentah tidak disimpan. Gunakan hanya data sintetis, atau data anonim dengan izin resmi.</dd></div>
+      <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas.</dd></div>
+      <div><dt>Data sintetis</dt><dd>Empat belas dari 80 klaim disisipi pola agar halaman bisa menghitung apa yang ditangkap tiap lapisan. Polanya lebih bersih daripada klaim nyata, jadi angka ini menunjukkan logika bekerja, bukan perkiraan kinerja. Satu klaim fiktif sengaja dibuat tampak wajar pada keempat fitur dan memang tidak tertangkap.</dd></div>
+      <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan.</dd></div>
+      <div><dt>Cakupan</dt><dd>Kategori 2, Efisiensi Risiko pada Fasilitas Kesehatan: Manipulasi Obat &amp; Alkes serta Phantom &amp; Repeat Billing, mengacu pada Panduan Peserta Healthkathon 2026 dan Permenkes No. 16/2019.</dd></div>
+    </dl>
+  </section>
+
+  <footer class="foot" id="foot" hidden>
+    <span>Prototype VeriKlaim · Tim Bill Buster · Healthkathon 2026</span>
+    <span>Flag adalah permintaan pemeriksaan, bukan tuduhan.</span>
+  </footer>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<noscript><p class="notice">VeriKlaim membutuhkan JavaScript.</p></noscript>
+</body>
+</html>

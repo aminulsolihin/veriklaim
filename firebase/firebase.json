@@ -1,0 +1,9 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*"],
+    "rewrites": [
+      { "source": "**", "run": { "serviceId": "veriklaim", "region": "us-central1" } }
+    ]
+  }
+}

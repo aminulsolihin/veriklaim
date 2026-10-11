@@ -1,0 +1,23 @@
+# Render Blueprint: one free web service. Create the Postgres database separately (see README)
+# and paste its connection string into DATABASE_URL when Render asks for it.
+services:
+  - type: web
+    name: veriklaim
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: VERIFIKATOR_PASSWORD
+        sync: false
+      - key: SUPERVISOR_PASSWORD
+        sync: false
+      - key: LOGIN_HINT
+        sync: false
