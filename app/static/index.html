@@ -6,32 +6,38 @@
 <title>VeriKlaim · Penyaringan Klaim</title>
 <meta name="description" content="Prototype penyaringan klaim top-up obat dan alkes pada berkas E-Klaim INA-CBG: aturan tagihan, lapisan anomali, alasan per klaim, dan alur keputusan verifikator yang tersimpan.">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#faf8eb">
 <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="/assets/styles.css">
 <script src="/assets/js/app.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Langsung ke isi</a>
 
+<div class="sheet">
 <header class="top" id="top" hidden>
   <a class="brand" href="#/queue">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 L29 16 L16 29 L3 16 Z" fill="#fdbd00" stroke="#17a068" stroke-width="4" stroke-linejoin="round"/></svg>
-    VeriKlaim
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 L29 16 L16 29 L3 16 Z" fill="#faf1a2" stroke="#000" stroke-width="3.5" stroke-linejoin="round"/></svg>
+    <span>VeriKlaim</span>
   </a>
   <nav id="nav" aria-label="Bagian">
-    <a href="#/queue" data-route="queue">Antrean</a>
-    <a href="#/batches" data-route="batches">Batch</a>
-    <a href="#/refs" data-route="refs">Harga acuan</a>
-    <a href="#/robust" data-route="robust">Ketahanan</a>
-    <a href="#/audit" data-route="audit" data-role="audit">Jejak audit</a>
-    <a href="#/feedback" data-route="feedback">Umpan balik</a>
-    <a href="#/about" data-route="about">Tentang</a>
+    <a href="#/queue" data-route="queue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg><span>Antrean</span></a>
+    <a href="#/batches" data-route="batches"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-5M9.5 14.5 12 12l2.5 2.5"/></svg><span>Batch</span></a>
+    <a href="#/robust" data-route="robust"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/></svg><span>Ketahanan</span></a>
+    <div class="sec" id="navSec">
+      <a href="#/refs" data-route="refs"><span>Harga acuan</span></a>
+      <a href="#/audit" data-route="audit" data-role="audit"><span>Jejak audit</span></a>
+      <a href="#/feedback" data-route="feedback"><span>Umpan balik</span></a>
+      <a href="#/about" data-route="about"><span>Tentang</span></a>
+    </div>
+    <button type="button" class="morebtn" id="moreBtn" aria-expanded="false" aria-controls="navSec"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span>Lainnya</span></button>
   </nav>
   <div class="who">
-    <span><b id="whoName"></b> <span class="role" id="whoRole"></span></span>
+    <span class="av" id="whoAv" aria-hidden="true"></span>
+    <span class="wtxt"><span class="hi">Halo,</span> <b id="whoName"></b> <span class="role" id="whoRole"></span></span>
     <button type="button" class="btn ghost small" id="signOut">Keluar</button>
   </div>
 </header>
@@ -45,28 +51,33 @@
 
   <!-- masuk -->
   <section id="view-login" class="login" hidden>
-    <p class="eyebrow">Prototype · Healthkathon 2026 · Tim Bill Buster</p>
-    <h1 class="display">VeriKlaim</h1>
-    <p class="sub">Periksa tagihan. Temukan pola. Jelaskan alasannya. Penyaringan top-up obat dan alkes pada klaim INA-CBG, langsung dari berkas E-Klaim.</p>
+    <div class="hero">
+      <i class="ring r1" aria-hidden="true"></i><i class="ring r2" aria-hidden="true"></i><i class="ring r3" aria-hidden="true"></i><i class="glow" aria-hidden="true"></i>
+      <p class="eyebrow">Prototype Healthkathon 2026 · Tim Bill Buster</p>
+      <h1 class="display">VeriKlaim</h1>
+      <p class="sub">Periksa tagihan. Temukan pola. Jelaskan alasannya. Penyaringan top-up obat dan alkes pada klaim INA-CBG, langsung dari berkas E-Klaim.</p>
+    </div>
     <div class="card judge" id="judgeCard" hidden>
       <h2>Untuk juri dan penilai</h2>
       <p>Coba seluruh alur tanpa akun. Anda mendapat salinan data sintetis sendiri: keputusan dan unggahan Anda tidak terlihat orang lain dan dihapus otomatis setelah <span id="guestHours">24</span> jam.</p>
-      <button type="button" class="btn" id="judgeBtn">Coba sebagai juri</button>
+      <button type="button" class="btn big" id="judgeBtn">Coba sebagai juri</button>
       <p class="msg err" id="judgeMsg" role="alert"></p>
     </div>
-    <p class="eyebrow team-label" id="teamLabel" hidden>Masuk tim</p>
-    <form id="loginForm" class="card" autocomplete="on">
-      <div class="field">
-        <label for="username">Nama pengguna</label>
-        <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
-      </div>
-      <div class="field">
-        <label for="password">Kata sandi</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
-      </div>
-      <button type="submit" class="btn" id="loginBtn">Masuk</button>
-      <p class="msg err" id="loginMsg" role="alert"></p>
-    </form>
+    <details class="teambox" id="teamBox" open>
+      <summary id="teamLabel" hidden>Masuk sebagai tim</summary>
+      <form id="loginForm" class="card" autocomplete="on">
+        <div class="field">
+          <label for="username">Nama pengguna</label>
+          <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
+        </div>
+        <div class="field">
+          <label for="password">Kata sandi</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="200">
+        </div>
+        <button type="submit" class="btn" id="loginBtn">Masuk</button>
+        <p class="msg err" id="loginMsg" role="alert"></p>
+      </form>
+    </details>
     <p class="hint" id="loginHint" hidden></p>
     <p class="hint">Hanya data sintetis. Peran tim: verifikator mencatat keputusan; supervisor juga mengatur kapasitas antrean, mengubah harga acuan, membaca jejak audit, dan melihat umpan balik.</p>
   </section>
@@ -75,7 +86,6 @@
   <section id="view-queue" class="stack" hidden>
     <div class="mast">
       <div>
-        <p class="eyebrow">Antrean pemeriksaan</p>
         <h1 id="batchTitle">Antrean pemeriksaan</h1>
         <p class="databar" id="databar"></p>
       </div>
@@ -118,7 +128,7 @@
 
       <section class="kpis" id="kpis" aria-label="Ringkasan penyaringan"></section>
 
-      <section class="panel">
+      <section class="panel chartcard">
         <header><h2>Dua pemeriksaan untuk setiap klaim ber-top-up</h2></header>
         <p class="lede">Setiap tanda adalah satu klaim dengan top-up Special Drug atau Special Prosthesis. Di kiri garis tegak, seluruh tagihan rumah sakit lebih kecil dari harga acuan barang yang diklaim. Di atas garis mendatar, klaim tidak biasa pada lama rawat, top-up berulang, atau volume, walaupun tagihannya tampak wajar.</p>
         <div class="legend" id="legend"></div>
@@ -140,12 +150,7 @@
             </div>
           </header>
           <p class="lede" id="queueLede"></p>
-          <div class="tblwrap tall">
-            <table>
-              <thead><tr><th>Klaim (SEP)</th><th>Top-up</th><th class="r">Tagihan ÷ acuan</th><th class="r">Skor</th><th>Hasil · keputusan</th><th>Faktor utama</th></tr></thead>
-              <tbody id="rows"></tbody>
-            </table>
-          </div>
+          <div class="claims" id="rows" role="list" aria-label="Klaim di antrean"></div>
         </section>
       </div>
 
@@ -176,7 +181,6 @@
   <!-- batch -->
   <section id="view-batches" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Batch</p>
       <h1>Berkas E-Klaim</h1>
       <p class="sub">Setiap unggahan dibaca dan diskor di server, lalu disimpan sebagai satu batch dengan antreannya sendiri.</p>
     </div></div>
@@ -204,7 +208,7 @@
     <section class="panel">
       <header><h2>Batch tersimpan</h2></header>
       <div class="tblwrap">
-        <table>
+        <table class="cardrows">
           <thead><tr><th>Batch</th><th>Diunggah</th><th>Baris</th><th>Antrean</th><th></th></tr></thead>
           <tbody id="batchRows"></tbody>
         </table>
@@ -215,7 +219,6 @@
   <!-- harga acuan -->
   <section id="view-refs" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Harga acuan</p>
       <h1>Item top-up dan harga acuannya</h1>
       <p class="sub">Klaim disaring bila kode Special CMG-nya punya harga acuan di sini. Perubahan berlaku untuk berkas yang diunggah sesudahnya; batch tersimpan tetap memakai harga saat disaring. Tanggal pembaruan tercatat agar harga usang mudah terlihat.</p>
     </div></div>
@@ -266,12 +269,11 @@
   <!-- ketahanan -->
   <section id="view-robust" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Ketahanan</p>
       <h1>Seberapa tahan penyaringan pada data yang lebih sulit?</h1>
       <p class="sub">Sampel 80 klaim sengaja dibuat bersih. Di sini model diuji pada <span id="rbN">2.000</span> klaim sintetis yang memuat pengulang yang sah, dan waktu prosesnya diukur pada berkas besar. Semua data sintetis; ini bukan akurasi pada klaim riil.</p>
     </div></div>
 
-    <section class="panel">
+    <section class="panel chartcard">
       <header><h2>Pola bermasalah yang masuk antrean, menurut beban pemeriksaan</h2></header>
       <p class="lede">Tegak: porsi pola bermasalah yang ikut diperiksa. Mendatar: porsi klaim top-up yang diperiksa. Garis putus-putus adalah pemeriksaan acak. L1 serupa dengan sampel 80 klaim; makin besar angkanya, makin mirip pola itu dengan pengulang yang sah.</p>
       <div class="legend" id="rbLegend"></div>
@@ -302,7 +304,6 @@
   <!-- jejak audit -->
   <section id="view-audit" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Jejak audit</p>
       <h1>Siapa melakukan apa, dan kapan</h1>
       <p class="sub">Masuk, unggahan, perubahan pengaturan, keputusan, tanggapan RS, perubahan harga acuan, dan ekspor. Terbaru di atas.</p>
     </div></div>
@@ -319,7 +320,6 @@
   <!-- umpan balik -->
   <section id="view-feedback" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Umpan balik</p>
       <h1>Apakah VeriKlaim berguna untuk pekerjaan Anda?</h1>
       <p class="sub">Satu menit. Jawaban dipakai tim Bill Buster untuk memperbaiki prototype. Jangan tulis data pribadi pasien.</p>
     </div></div>
@@ -389,7 +389,6 @@
   <!-- tentang -->
   <section id="view-about" class="stack" hidden>
     <div class="mast"><div>
-      <p class="eyebrow">Tentang</p>
       <h1>Apa yang ditunjukkan prototype ini, dan apa yang belum</h1>
     </div></div>
     <dl class="notes">
@@ -417,6 +416,7 @@
     <span id="footNote">Flag adalah permintaan pemeriksaan, bukan tuduhan.</span>
   </footer>
 </main>
+</div>
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <noscript><p class="notice">VeriKlaim membutuhkan JavaScript.</p></noscript>

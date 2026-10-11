@@ -66,7 +66,8 @@ function showLogin(msg){
   const hint=S.config&&S.config.loginHint; $('loginHint').hidden=!hint; $('loginHint').textContent=hint||'';
   const judge=!!(S.config&&S.config.judgeMode);
   $('judgeCard').hidden=!judge; $('teamLabel').hidden=!judge; $('judgeMsg').textContent='';
-  if(judge){$('guestHours').textContent=S.config.guestHours; $('judgeBtn').focus()} else $('username').focus();
+  $('teamBox').open=!judge;
+  if(judge) $('guestHours').textContent=S.config.guestHours; else $('username').focus();
 }
 $('loginForm').addEventListener('submit',async e=>{
   e.preventDefault(); const b=$('loginBtn'); b.disabled=true; $('loginMsg').textContent='';
@@ -90,6 +91,7 @@ $('signOut').addEventListener('click',async()=>{
 async function enter(){
   $('top').hidden=false; $('foot').hidden=false;
   $('whoName').textContent=S.user.name; $('whoRole').textContent=ROLE[S.user.role]||S.user.role;
+  $('whoAv').textContent=(S.user.name||'?').trim().charAt(0).toUpperCase();
   const sup=S.user.role==='supervisor', guest=!!S.user.guest;
   document.querySelectorAll('#nav a[data-role]').forEach(a=>{a.hidden=a.dataset.role==='audit'&&!(sup||guest)});
   $('refForm').hidden=!sup; $('saveSettings').hidden=!(sup||guest);
@@ -110,9 +112,20 @@ function route(){
   if(asked&&asked!==r) history.replaceState(null,'','#/'+r);
   S.route=r; showOnly('view-'+r);
   document.querySelectorAll('#nav a').forEach(a=>{if(a.dataset.route===r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+  $('moreBtn').toggleAttribute('data-current',!!$('navSec').querySelector('a[aria-current]'));
   Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,robust:openRobust,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
 }
 window.addEventListener('hashchange',route);
+
+/* menu "Lainnya" (ponsel) dan lembar rincian klaim */
+const MOBILE=window.matchMedia('(max-width:980px)');
+function closeMore(){$('nav').classList.remove('open'); $('moreBtn').setAttribute('aria-expanded','false')}
+$('moreBtn').addEventListener('click',()=>{const o=!$('nav').classList.contains('open'); $('nav').classList.toggle('open',o); $('moreBtn').setAttribute('aria-expanded',String(o))});
+document.addEventListener('click',e=>{if(!e.target.closest('#nav')) closeMore()});
+window.addEventListener('hashchange',()=>{closeMore(); closeSheet()});
+function openSheet(){if(!MOBILE.matches) return; $('why').classList.add('sheet'); $('why').scrollTop=0; document.body.classList.add('sheet-open')}
+function closeSheet(){$('why').classList.remove('sheet'); document.body.classList.remove('sheet-open')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMore(); closeSheet()}});
 
 /* ---------- batch ---------- */
 async function loadBatches(){
@@ -304,20 +317,20 @@ function renderRows(){
   $('queueLede').textContent='Diurutkan menurut skor anomali. Pilih klaim untuk melihat alasannya dan mencatat keputusan.'+(total>ROW_CAP?` Menampilkan ${ROW_CAP} pertama dari ${dots(total)}.`:'');
   $('rows').innerHTML=list.map(c=>{
     const d=c.mf?topDriver(c):-1;
-    const drv=c.mf&&d>=0?`${DRIVER[d]}<span class="sm">${esc(featText(c,d))}</span>`:c.pf?`Tagihan RS<span class="sm">${times(c.cover)} acuan</span>`:'—';
+    const why=c.mf&&d>=0?`${DRIVER[d]}: ${esc(featText(c,d))}`:c.pf?`Tagihan RS: ${times(c.cover)} acuan`:'';
     const w=Math.max(4,Math.min(100,(c.score-Y0)/(Y1-Y0)*100));
     const rv=c.review?`<span class="rv done">${REVIEW[c.review.status]}</span>`:(c.st!=='clear'?'<span class="rv">Belum diperiksa</span>':'');
-    return `<tr data-id="${c.id}" aria-selected="${S.sel===c}">
-      <td class="nw"><button type="button" class="idb">${esc(c.sep)}</button><span class="sm">RS ${esc(c.rs)} · Kelas ${esc(c.kelasRs||'?')} · ${esc(c.kodeTarif)}</span><span class="sm">pulang ${esc(c.disTxt||c.admTxt)}</span></td>
-      <td class="item"><span class="num">${esc(c.final||c.code)}</span><span class="sm">${esc(c.item)}</span><span class="sm">${esc(c.cbg)}</span></td>
-      <td class="r num">${times(c.cover)}</td>
-      <td class="r num">${sc(c.score)}<span class="sbar${c.mf?' on':''}"><i style="width:${w.toFixed(0)}%"></i></span></td>
-      <td><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span>${rv}</td>
-      <td class="drv">${drv}</td></tr>`;
-  }).join('')||`<tr><td colspan="6">${S.view==='todo'?'Semua klaim di antrean sudah diperiksa.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan ambang tagihan atau kapasitas.'}</td></tr>`;
+    return `<article class="claim st-${c.st}" role="listitem" data-id="${c.id}"${S.sel===c?' aria-current="true"':''}>
+      <div class="chips"><span class="chip">Skor <b class="num">${sc(c.score)}</b></span><span class="chip"><b class="num">${times(c.cover)}</b> acuan</span><span class="chip">RS ${esc(c.rs)}</span></div>
+      <h3 class="ctitle">${esc(c.item)}</h3>
+      <p class="cdesc"><button type="button" class="idb">${esc(c.sep)}</button><span><span class="num">${esc(c.final||c.code)}</span> · ${esc(c.cbg)} · pulang ${esc(c.disTxt||c.admTxt)}</span></p>
+      <div class="cfoot"><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span>${rv}</div>
+      ${why?`<p class="cwhy">${why}</p>`:''}
+      <span class="sbar${c.mf?' on':''}"><i style="width:${w.toFixed(0)}%"></i></span></article>`;
+  }).join('')||`<p class="noclaims">${S.view==='todo'?'Semua klaim di antrean sudah diperiksa.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan ambang tagihan atau kapasitas.'}</p>`;
   $('exportCsv').href=`/api/batches/${S.batch.id}/export.csv?view=${S.view==='all'?'all':'flagged'}&thr=${S.thr}&k=${S.k}`;
 }
-$('rows').addEventListener('click',e=>{const tr=e.target.closest('tr[data-id]'); if(tr&&S.byId[tr.dataset.id]) selectClaim(S.byId[tr.dataset.id],true)});
+$('rows').addEventListener('click',e=>{const el=e.target.closest('.claim[data-id]'); if(el&&S.byId[el.dataset.id]) selectClaim(S.byId[el.dataset.id],true)});
 function setView(v,quiet){
   S.view=v;
   document.querySelectorAll('.seg button[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===v));
@@ -331,10 +344,7 @@ async function selectClaim(c,user){
   S.sel=c; S.draft=null;
   if(user){tick('reasons'); if(c.rank===2&&S.batch.labelled) tick('example')}
   drawChart(); renderRows(); renderWhy();
-  if(user&&window.matchMedia('(max-width:980px)').matches){
-    const calm=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    $('why').scrollIntoView({behavior:calm?'auto':'smooth',block:'start'});
-  }
+  if(user) openSheet();
   if(c.full) return;
   try{
     const d=await api('GET','/api/claims/'+c.id);
@@ -387,11 +397,12 @@ function renderWhy(){
   const rv=c.review, draft=S.draft&&S.draft.id===c.id?S.draft:{status:rv?rv.status:'',note:rv?rv.note:'',resp:rv?rv.rsResponse||'':''};
   const opt=(v,t,sub)=>`<label class="opt"><input type="radio" name="status" value="${v}"${draft.status===v?' checked':''}><span class="t">${t}<span class="s">${sub}</span></span></label>`;
   const tag=S.batch.labelled?`<span class="tag">Label sintetis: ${c.label?LABELS[c.label]||esc(c.label):'klaim biasa'}</span>`:'';
-  $('why').innerHTML=`<header><h2>Klaim terpilih</h2>${tag}</header>
+  $('why').innerHTML=`<header><button type="button" class="back" data-act="close" aria-label="Kembali ke antrean"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Antrean</button><h2>Klaim terpilih</h2>${tag}</header>
   <div class="body">
-    <div>
+    <div class="vhead st-${c.st}">
       <div class="idline"><span class="num">${esc(c.sep)}</span><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span></div>
       <p class="verdict">${verdict}</p>
+      <p class="herometa">${esc(c.item)} · <span class="num">${esc(c.final||c.code)}</span></p>
     </div>
     <form class="review" id="reviewForm">
       <h3>Keputusan verifikator</h3>
@@ -443,6 +454,7 @@ async function saveReview(status,note,resp){
     const b=S.batches.find(x=>x.id===S.batch.id); if(b) b.stale=true;
     update();
     toast(status?'Keputusan tersimpan: '+REVIEW[status]+'.':'Klaim dibuka ulang.');
+    if(status) closeSheet();
     if(status) tick('decide');
   }catch(e){fail(e)}
 }
@@ -453,7 +465,7 @@ $('why').addEventListener('submit',e=>{
   if(!st){toast('Pilih keputusan terlebih dahulu.',true);return}
   saveReview(st.value,$('reviewNote').value,$('rsResponse').value);
 });
-$('why').addEventListener('click',e=>{if(e.target.id==='reopen') saveReview(null,'','')});
+$('why').addEventListener('click',e=>{if(e.target.id==='reopen') saveReview(null,'',''); if(e.target.closest('[data-act=close]')) closeSheet()});
 
 function update(){
   if(!S.batch) return;
@@ -640,7 +652,9 @@ async function openExample(){
 const tourKey=()=>'vk-tour-'+(S.user?S.user.username:'');
 function loadTour(){
   S.tour={}; S.tourHidden=false;
-  try{const v=JSON.parse(sessionStorage.getItem(tourKey())||'null'); if(v){S.tour=v.t||{}; S.tourHidden=!!v.h}}catch(_){}
+  let saved=false;
+  try{const v=JSON.parse(sessionStorage.getItem(tourKey())||'null'); if(v){saved=true; S.tour=v.t||{}; S.tourHidden=!!v.h}}catch(_){}
+  if(!saved&&MOBILE.matches) S.tourHidden=true;
   renderTour();
 }
 function saveTour(){try{sessionStorage.setItem(tourKey(),JSON.stringify({t:S.tour,h:S.tourHidden}))}catch(_){}}
