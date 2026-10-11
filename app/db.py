@@ -10,6 +10,22 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from .config import settings
 
 _sqlite = settings.database_url.startswith("sqlite")
+
+
+def _check_url(url: str) -> None:
+    """Stop with a plain message, not a traceback, when DATABASE_URL is not a database address."""
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+    try:
+        make_url(url)
+    except ArgumentError:
+        raise SystemExit(
+            "DATABASE_URL is not a valid database address. Paste only the connection string from Neon, "
+            "e.g. postgresql://user:password@ep-xxxx.aws.neon.tech/neondb?sslmode=require"
+        ) from None
+
+
+_check_url(settings.database_url)
 engine = create_engine(
     settings.database_url,
     connect_args={"check_same_thread": False} if _sqlite else {},

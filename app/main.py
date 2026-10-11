@@ -39,7 +39,13 @@ REVIEW_STATUSES = ("confirmed", "cleared", "docs_requested")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(engine)
+    try:
+        Base.metadata.create_all(engine)
+    except Exception as exc:  # the most common first-deploy problem; say so in plain words
+        log.error("Cannot reach the database in DATABASE_URL (%s: %s). Check the connection string: it should "
+                  "start with postgresql:// and end with sslmode=require, with no quotes or 'psql' around it.",
+                  type(exc).__name__, str(exc).splitlines()[0][:300] if str(exc) else "")
+        raise
     db_module.add_missing_columns()
     with SessionLocal() as db:
         services.seed(db)

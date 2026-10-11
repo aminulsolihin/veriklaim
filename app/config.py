@@ -9,6 +9,23 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 def _db_url(raw: str) -> str:
+    # Tolerate what people paste from a provider's "connect" dialog: surrounding quotes,
+    # a "psql" command around the URL, or a DATABASE_URL= prefix.
+    raw = " ".join(raw.split())  # a line break inside a pasted value
+    for prefix in ("DATABASE_URL=", "DATABASE_URL =", "psql ", "jdbc:"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):].strip()
+    raw = raw.strip("'\"").strip()
+    if "://" in raw:
+        raw = "".join(raw.split())  # a URL has no spaces; drop any from a wrapped paste
+    if raw and "://" not in raw and "host=" in raw:
+        # libpq "host=... user=... dbname=..." form, which some dialogs show
+        from urllib.parse import quote
+        parts = dict(p.split("=", 1) for p in raw.split() if "=" in p)
+        q = "&".join("{}={}".format(k, v) for k, v in parts.items() if k in ("sslmode", "channel_binding"))
+        raw = "postgresql://{}:{}@{}{}/{}{}".format(
+            quote(parts.get("user", ""), safe=""), quote(parts.get("password", ""), safe=""), parts.get("host", ""),
+            ":" + parts["port"] if "port" in parts else "", parts.get("dbname", ""), "?" + q if q else "")
     # Hosts hand out postgres:// or postgresql:// URLs; SQLAlchemy needs the driver named.
     if raw.startswith("postgres://"):
         raw = "postgresql://" + raw[len("postgres://"):]
