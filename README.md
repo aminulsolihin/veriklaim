@@ -16,8 +16,10 @@ and matches the pitch deck: every number the deck quotes for the synthetic sampl
 | Explanations | Exact Shapley values per claim, with a plain-language reason and next check. |
 | Review | A verifikator records a decision and note on each claim. When documents are requested, the hospital's response is recorded on the same claim. Decisions are stored. |
 | Comparison | On the synthetic sample, the page shows what the queue catches against a random sample of the same size (13 vs 2.8 of 14 at the default settings). |
-| Bias monitoring | Flag rate per hospital, with confirmed, cleared and awaiting-documents counts. |
-| Judge mode | A "Coba sebagai juri" button on the sign-in page. Each visitor gets a private, already-scored copy of the synthetic sample, an 8-step guided checklist, and their own audit trail. Guests cannot change reference prices or see anyone else's data, and are removed after 24 hours. |
+| Bias monitoring | Flag rate per hospital and per top-up code, with confirmed, cleared and awaiting-documents counts. A tag marks rates at least twice the batch average. |
+| Robustness page | "Ketahanan": the curve of patterns caught against review workload on 2,000 synthetic claims that include legitimate repeaters, and the timing on large files. Figures come from `app/data/robustness.json`, written from the two scripts under `tools/`. |
+| Reference-price notice | While any reference price is marked as a placeholder, the queue says so. The bundled prices are illustrative, not e-Katalog data. |
+| Judge mode | A "Coba sebagai juri" button on the sign-in page. Each visitor gets a private, already-scored copy of the synthetic sample, a 9-step guided checklist, and their own audit trail. Guests cannot change reference prices or see anyone else's data, and are removed after 24 hours. |
 | Feedback and usage | A one-minute feedback form for anyone who tries the app. A supervisor sees the answers, exports them as CSV, and sees usage counts from the audit log (judge sessions, decisions, uploads). |
 | Roles | `verifikator` reviews and uploads. `supervisor` also saves thresholds, edits reference prices, deletes batches and reads the audit log. |
 | Audit log | Sign-ins, uploads, threshold changes, decisions and hospital responses, reference-price edits and exports. |
@@ -178,14 +180,38 @@ app/
   db.py          tables
   security.py    password hashing, card tokens, sign-in limiter
   config.py      settings from environment variables
-  data/          synthetic sample and its labels
+  data/          synthetic sample, its labels, robustness figures
   static/        index.html, styles.css, js/app.js
 tests/           parser, model and API tests
 tools/make_sample.js   regenerates the synthetic sample (Node)
+tools/stress_test.py   2,000-claim robustness check with legitimate repeaters (synthetic)
+tools/benchmark.py     read-and-score timing on a large synthetic file
 render.yaml      Render Blueprint
 firebase/        Firebase Hosting config for Route B
 Dockerfile       for container hosts
 ```
+
+## Robustness and scale checks (synthetic)
+
+The 80-claim sample is clean by construction, so two scripts check the model on harder, larger data.
+Both use synthetic data only; neither says anything about accuracy on real claims.
+
+```bash
+python tools/stress_test.py                 # 20 seeds, 2,000 claims, about 70 s
+python tools/benchmark.py 1530000 0.03      # 1.53 million rows, 3% with a top-up
+python tools/benchmark.py 1000000 1.0       # 1 million rows, every row a top-up
+```
+
+`stress_test.py` inserts eight groups of repeated top-ups at four levels of difficulty (L1 looks like the
+sample, L4 is identical to a legitimate repeat) and about 8% legitimate repeaters (for example both knees
+replaced about ten weeks apart). With the default settings, reviewing 5% of claims catches 100%, 97.5%, 82.2%
+and 22.8% of the inserted patterns at L1 to L4, with precision 24%, 15.6%, 13.2% and 3.6%
+(20, 19.5, 16.5 and 4.5 times a random review). At L4 the four features cannot tell the pattern from a legitimate
+repeat; catching it needs the medical record. `benchmark.py` times parsing, scoring, ranking and explaining
+(not database writes): on a 2 vCPU, 8 GB machine, 6.5 s and 1.07 GB for 1.53 million rows with 3% top-ups,
+and 38.7 s and 2.2 GB for 1 million rows that all have a top-up. The hosted demo still limits an upload to
+2,000 claims. The same figures are shown in the app on the Ketahanan page, read from
+`app/data/robustness.json`; rerun the scripts and update that file if you change the model.
 
 ## Things to change before real use
 

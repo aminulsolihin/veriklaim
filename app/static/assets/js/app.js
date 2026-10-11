@@ -22,9 +22,10 @@ const FEAT_LABEL=['Tagihan RS vs harga acuan','Lama rawat vs INA-CBG sama','Top-
 const ACTIONS={demo_login:'Mulai sesi juri',feedback:'Mengirim umpan balik',login:'Masuk',login_failed:'Gagal masuk',logout:'Keluar',batch_upload:'Mengunggah batch',batch_settings:'Mengubah pengaturan',batch_delete:'Menghapus batch',review_set:'Mencatat keputusan',review_reopened:'Membuka ulang klaim',reference_price_set:'Mengubah harga acuan',reference_price_delete:'Menghapus harga acuan',export:'Ekspor CSV'};
 const ROLE={verifikator:'verifikator',supervisor:'supervisor',juri:'juri · tamu'};
 const PERAN={verifikator:'Verifikator / anti-fraud BPJS','koder-rs':'Koder / casemix RS',klinisi:'Dokter / nakes','manajemen-rs':'Manajemen RS',juri:'Juri / penilai',lainnya:'Lainnya'};
-const ROUTES=['queue','batches','refs','audit','feedback','about'];
+const ROUTES=['queue','batches','refs','robust','audit','feedback','about'];
 
-const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[]};
+const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null};
+const UP_WARN=$('upWarn').textContent;
 let X1=5,Y0=0.3,Y1=0.76;
 
 /* ---------- API ---------- */
@@ -93,7 +94,9 @@ async function enter(){
   document.querySelectorAll('#nav a[data-role]').forEach(a=>{a.hidden=a.dataset.role==='audit'&&!(sup||guest)});
   $('refForm').hidden=!sup; $('saveSettings').hidden=!(sup||guest);
   $('footNote').textContent=guest?`Sesi juri: data Anda terpisah dan dihapus otomatis ${when(S.user.expiresAt)}.`:'Flag adalah permintaan pemeriksaan, bukan tuduhan.';
+  $('upWarn').textContent=guest?`Unggah hanya berkas uji sintetis; jangan unggah data peserta JKN riil. Satu berkas disaring paling banyak ${dots(S.config.maxClaims)} klaim ber-top-up. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.`:UP_WARN;
   loadTour();
+  refreshRefNote();
   await loadBatches();
   route();
 }
@@ -103,10 +106,11 @@ function route(){
   let r=asked||'queue';
   if(!ROUTES.includes(r)||(r==='audit'&&S.user.role!=='supervisor'&&!S.user.guest)) r='queue';
   if(r==='audit') tick('audit');
+  if(r==='robust') tick('robust');
   if(asked&&asked!==r) history.replaceState(null,'','#/'+r);
   S.route=r; showOnly('view-'+r);
   document.querySelectorAll('#nav a').forEach(a=>{if(a.dataset.route===r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
-  Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
+  Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,robust:openRobust,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
 }
 window.addEventListener('hashchange',route);
 
@@ -219,21 +223,32 @@ function renderLegend(n){
   $('legend').innerHTML=[['both',n.both],['rule',n.ruleOnly],['model',n.modelOnly],['clear',S.claims.length-n.flag]]
     .map(([st,v])=>`<span>${icon(st)}${st==='both'?'Ditandai kedua pemeriksaan':st==='rule'?'Aturan tagihan saja':st==='model'?'Lapisan anomali saja':'Bersih'} <b>${v}</b></span>`).join('');
 }
-function renderRs(){
+function groupRates(key,make){
   const by={}, N=S.claims.length; let flagged=0;
   S.claims.forEach(c=>{
-    const r=by[c.rs]||(by[c.rs]={rs:c.rs,kelas:c.kelasRs,n:0,f:0,conf:0,clr:0,docs:0});
+    const k=key(c), r=by[k]||(by[k]=make(c));
     r.n++; if(c.st!=='clear'){r.f++; flagged++;
       const s=c.review&&c.review.status; if(s==='confirmed')r.conf++; else if(s==='cleared')r.clr++; else if(s==='docs_requested')r.docs++;}
   });
-  const avg=flagged/N, list=Object.values(by).sort((a,b)=>b.f/b.n-a.f/a.n||b.n-a.n);
-  $('rsRows').innerHTML=list.map(r=>{
-    const rate=r.f/r.n, hi=r.n>=4&&rate>=2*avg&&rate>0;
-    return `<tr><td>RS ${esc(r.rs)}<span class="sm">Kelas ${esc(r.kelas||'?')}</span></td>
-      <td class="r num">${r.n}</td><td class="r num">${r.f}</td>
+  const avg=flagged/N;
+  return {N,flagged,avg,list:Object.values(by).sort((a,b)=>b.f/b.n-a.f/a.n||b.n-a.n)};
+}
+function rateCells(r,avg){
+  const rate=r.f/r.n, hi=r.n>=4&&rate>=2*avg&&rate>0;
+  return `<td class="r num">${r.n}</td><td class="r num">${r.f}</td>
       <td><span class="num">${Math.round(rate*100)}%</span>${hi?' <span class="tag">≥ 2× rata-rata</span>':''}<span class="sbar rate${hi?' on':''}"><i style="width:${Math.round(rate*100)}%"></i></span></td>
-      <td class="r num">${r.conf}</td><td class="r num">${r.clr}</td><td class="r num">${r.docs}</td></tr>`;
-  }).join('')+`<tr><td><b>Rata-rata batch</b></td><td class="r num">${N}</td><td class="r num">${flagged}</td><td><span class="num">${Math.round(avg*100)}%</span></td><td></td><td></td><td></td></tr>`;
+      <td class="r num">${r.conf}</td><td class="r num">${r.clr}</td><td class="r num">${r.docs}</td>`;
+}
+function avgRow(N,flagged,avg){
+  return `<tr><td><b>Rata-rata batch</b></td><td class="r num">${N}</td><td class="r num">${flagged}</td><td><span class="num">${Math.round(avg*100)}%</span></td><td></td><td></td><td></td></tr>`;
+}
+function renderRs(){
+  const g=groupRates(c=>c.rs,c=>({rs:c.rs,kelas:c.kelasRs,n:0,f:0,conf:0,clr:0,docs:0}));
+  $('rsRows').innerHTML=g.list.map(r=>`<tr><td>RS ${esc(r.rs)}<span class="sm">Kelas ${esc(r.kelas||'?')}</span></td>${rateCells(r,g.avg)}</tr>`).join('')+avgRow(g.N,g.flagged,g.avg);
+}
+function renderCodes(){
+  const g=groupRates(c=>c.code,c=>({code:c.code,item:c.item,n:0,f:0,conf:0,clr:0,docs:0}));
+  $('codeRows').innerHTML=g.list.map(r=>`<tr><td><span class="num">${esc(r.code)}</span><span class="sm">${esc(r.item)}</span></td>${rateCells(r,g.avg)}</tr>`).join('')+avgRow(g.N,g.flagged,g.avg);
 }
 function renderUnsaved(){
   const b=S.batch, dirty=S.thr!==b.thresholdPct||S.k!==b.topK;
@@ -444,7 +459,7 @@ function update(){
   if(!S.batch) return;
   classify(); const n=counts();
   $('thrOut').textContent=S.thr+'%'; $('kOut').textContent=S.k;
-  renderHead(); renderPipe(n); renderKpis(n); renderLegend(n); renderUnsaved(); drawChart(); renderRows(); renderWhy(); renderRs(); renderTour();
+  renderHead(); renderPipe(n); renderKpis(n); renderLegend(n); renderUnsaved(); drawChart(); renderRows(); renderWhy(); renderRs(); renderCodes(); renderTour();
 }
 $('thr').addEventListener('input',e=>{S.thr=+e.target.value;update()});
 $('kk').addEventListener('input',e=>{S.k=+e.target.value;tick('capacity');update()});
@@ -455,7 +470,7 @@ $('saveSettings').addEventListener('click',async()=>{
     S.thr=S.batch.thresholdPct; S.k=S.batch.topK; update(); toast('Pengaturan batch ini tersimpan.'); tick('capacity');
   }catch(e){fail(e)}
 });
-let rz; window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(drawChart,120)});
+let rz; window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{drawChart();drawRobust()},120)});
 
 /* ---------- halaman batch ---------- */
 async function openBatches(){
@@ -496,8 +511,15 @@ $('uploadForm').addEventListener('submit',async e=>{
 });
 
 /* ---------- harga acuan ---------- */
+function setRefNote(list){
+  S.refPlaceholder=list.some(r=>/^placeholder/i.test(r.source||''));
+  $('refNote').hidden=!S.refPlaceholder;
+}
+async function refreshRefNote(){
+  try{setRefNote(await api('GET','/api/reference-prices'))}catch(_){$('refNote').hidden=true}
+}
 async function openRefs(){
-  S.refs=await api('GET','/api/reference-prices');
+  S.refs=await api('GET','/api/reference-prices'); setRefNote(S.refs);
   const sup=S.user.role==='supervisor';
   $('refRows').innerHTML=S.refs.map(r=>`<tr>
     <td class="num">${esc(r.code)}</td><td>${esc(r.description)}</td><td>${esc(r.type)}</td>
@@ -528,6 +550,54 @@ $('refForm').addEventListener('submit',async e=>{
 });
 $('refForm').addEventListener('reset',()=>{$('refMsg').textContent=''});
 
+/* ---------- ketahanan ---------- */
+const RB_COLOR=['var(--accent)','var(--c-model)','var(--c-rule-line)','var(--ink)'];
+const pct=v=>one(v*100)+'%';
+function rbMark(i,cx,cy,col){
+  if(i===0) return `<circle cx="${cx}" cy="${cy}" r="4.5" fill="${col}" stroke="var(--surface)" stroke-width="1.5"/>`;
+  if(i===1) return `<rect x="${cx-4.5}" y="${cy-4.5}" width="9" height="9" fill="${col}" stroke="var(--surface)" stroke-width="1.5"/>`;
+  if(i===2) return `<path d="M${cx},${cy-6} L${cx+5.5},${cy+4.5} L${cx-5.5},${cy+4.5} Z" fill="${col}" stroke="var(--surface)" stroke-width="1.5" stroke-linejoin="round"/>`;
+  return `<path d="M${cx},${cy-6} L${cx+6},${cy} L${cx},${cy+6} L${cx-6},${cy} Z" fill="${col}" stroke="var(--surface)" stroke-width="1.5" stroke-linejoin="round"/>`;
+}
+async function openRobust(){
+  if(!S.rb) S.rb=await api('GET','/api/robustness');
+  const d=S.rb, F=d.fractions, i5=F.indexOf(0.05), b=d.benchmark;
+  $('rbN').textContent=dots(d.n); $('rbShare').textContent=Math.round(d.legitRepeaterShare*100)+'%'; $('rbSeeds').textContent=d.seeds;
+  $('rbMachine').textContent=b.machine; $('rbMax').textContent=dots(S.config.maxClaims);
+  $('rbLegend').innerHTML=d.levels.map((l,i)=>`<span><svg class="mk" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${rbMark(i,8,8,RB_COLOR[i])}</svg><b>${esc(l.id)}</b> ${esc(l.description)}</span>`).join('')
+    +'<span><i class="sw dash" aria-hidden="true"></i>Pemeriksaan acak</span>';
+  $('rbRows').innerHTML=d.levels.map(l=>{
+    const rec=l.recall[i5], pr=l.precision[i5];
+    return `<tr><td><b>${esc(l.id)}</b> · ${esc(l.description)}<span class="sm">pola ${pct(l.baseRate)} dari seluruh klaim</span></td>
+      <td class="r num">${pct(rec)}</td><td class="r num">${pct(pr)}</td><td class="r num">${one(pr/l.baseRate)}×</td><td class="r num">${pct(l.legitInQueue[i5])}</td></tr>`;
+  }).join('')+`<tr><td><b>Pemeriksaan acak</b><span class="sm">beban yang sama</span></td><td class="r num">5%</td><td class="r num">= proporsi pola</td><td class="r num">1×</td><td class="r num">5%</td></tr>`;
+  $('rbBench').innerHTML=b.runs.map(r=>[`${dec(r.seconds,1)} detik`,`${dots(r.rows)} baris berkas${r.topupShare<1?', '+Math.round(r.topupShare*100)+'% ber-top-up':', semuanya top-up'}`,`memori puncak ${dec(r.peakGb,2).replace(/0$/,'')} GB`])
+    .concat([[dots(S.config.maxClaims),'klaim per unggahan pada demo ini','batas karena server gratis']])
+    .map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}<br>${k[2]}</div></div>`).join('');
+  drawRobust();
+}
+function drawRobust(){
+  if(S.route!=='robust'||!S.rb) return;
+  const d=S.rb, F=d.fractions, box=$('rbChart'), W=Math.max(300,box.clientWidth-16), H=W<520?300:380, m={l:46,r:18,t:34,b:46};
+  const xmax=Math.max(...F), x=f=>m.l+f/xmax*(W-m.l-m.r), y=r=>H-m.b-r*(H-m.t-m.b);
+  let g='';
+  [0,.25,.5,.75,1].forEach(t=>{g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--rule)"/><text x="${m.l-8}" y="${y(t)+4}" text-anchor="end">${Math.round(t*100)}%</text>`});
+  [0,.05,.1,.15,.2].filter(t=>t<=xmax+1e-9).forEach(t=>{g+=`<line x1="${x(t)}" x2="${x(t)}" y1="${H-m.b}" y2="${H-m.b+5}" stroke="var(--rule-strong)"/><text x="${x(t)}" y="${H-m.b+18}" text-anchor="middle">${Math.round(t*100)}%</text>`});
+  g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--rule-strong)"/>`;
+  g+=`<text class="axt" x="${(m.l+W-m.r)/2}" y="${H-6}" text-anchor="middle">${W<520?'Klaim top-up yang diperiksa':'Beban pemeriksaan: porsi klaim top-up yang diperiksa'}</text>`;
+  g+=`<text class="axt" x="${m.l-34}" y="${m.t-18}" text-anchor="start">Pola bermasalah yang ikut diperiksa</text>`;
+  g+=`<line x1="${x(.05)}" x2="${x(.05)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--c-rule-line)" stroke-width="2" stroke-dasharray="5 4"/><text class="thl" x="${x(.05)+6}" y="${y(.62)}">beban 5%</text>`;
+  g+=`<line x1="${x(0)}" y1="${y(0)}" x2="${x(xmax)}" y2="${y(xmax)}" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="6 5"/>`;
+  d.levels.forEach((l,i)=>{
+    const pts=[[0,0]].concat(F.map((f,j)=>[f,l.recall[j]]));
+    g+=`<polyline fill="none" stroke="${RB_COLOR[i]}" stroke-width="2.5" stroke-linejoin="round" points="${pts.map(p=>x(p[0]).toFixed(1)+','+y(p[1]).toFixed(1)).join(' ')}"/>`;
+    pts.slice(1).forEach(p=>{g+=rbMark(i,+x(p[0]).toFixed(1),+y(p[1]).toFixed(1),RB_COLOR[i])});
+  });
+  const i5=F.indexOf(0.05), sum=d.levels.map(l=>`${l.id} ${pct(l.recall[i5])}`).join(', ');
+  const old=box.querySelector('svg'); if(old) old.remove();
+  box.insertAdjacentHTML('afterbegin',`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Porsi pola bermasalah yang masuk antrean menurut beban pemeriksaan. Pada beban 5%: ${sum}; pemeriksaan acak 5%. Tabel di bawah memuat angka yang sama.">${g}</svg>`);
+}
+
 /* ---------- jejak audit ---------- */
 function detailText(a){
   let d; try{d=a.detail?JSON.parse(a.detail):null}catch(_){return a.detail}
@@ -552,7 +622,8 @@ const TOUR=[
   ['reasons','Baca alasan, kontribusi skor, dan langkah berikut untuk satu klaim'],
   ['decide','Catat keputusan, misalnya "Dokumen diminta" beserta tanggapan RS'],
   ['capacity','Geser kapasitas verifikator dan lihat isi antrean berubah','Ke pengaturan',()=>$('kk').scrollIntoView({behavior:'smooth',block:'center'})],
-  ['rs','Lihat tingkat flag per rumah sakit (pemantauan bias)','Lihat',()=>{tick('rs');$('rsPanel').scrollIntoView({behavior:'smooth',block:'start'})}],
+  ['rs','Lihat tingkat flag per rumah sakit dan per kode (pemantauan bias)','Lihat',()=>{tick('rs');$('rsPanel').scrollIntoView({behavior:'smooth',block:'start'})}],
+  ['robust','Buka halaman Ketahanan: kurva pada 2.000 klaim, termasuk pengulang yang sah (slide 13)','Buka',()=>{location.hash='#/robust'}],
   ['audit','Buka jejak audit: setiap tindakan Anda tercatat','Buka',()=>{location.hash='#/audit'}],
   ['upload','Opsional: unggah berkas contoh E-Klaim di halaman Batch','Ke Batch',()=>{location.hash='#/batches'}],
   ['feedback','Beri umpan balik, satu menit','Isi',()=>{location.hash='#/feedback'}]
@@ -582,7 +653,7 @@ function renderTour(){
     box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri</h2><span class="prog">${done} dari ${TOUR.length} langkah · <button type="button" class="go" data-tour="show">Tampilkan</button></span></div>`;
     return;
   }
-  box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri: 8 langkah, sekitar 5 menit</h2>
+  box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri: ${TOUR.length} langkah, sekitar 5 menit</h2>
     <span class="prog">${done} dari ${TOUR.length} selesai · <button type="button" class="go" data-tour="hide">Sembunyikan</button></span></div>
     <ol>${TOUR.map((t,i)=>`<li class="${S.tour[t[0]]?'done':''}"><span class="ck" aria-hidden="true">${S.tour[t[0]]?'✓':i+1}</span><span class="tx">${esc(t[1])}${t[2]?` <button type="button" class="go" data-step="${t[0]}">${esc(t[2])}</button>`:''}${S.tour[t[0]]?'<span class="sr"> (selesai)</span>':''}</span></li>`).join('')}</ol>
     <p class="meta">Data sintetis berformat E-Klaim. Sesi ini milik Anda sendiri dan dihapus otomatis ${esc(when(S.user.expiresAt))}.</p>`;

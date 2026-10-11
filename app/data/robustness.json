@@ -1,0 +1,176 @@
+{
+ "n": 2000,
+ "seeds": 20,
+ "legitRepeaterShare": 0.08,
+ "fractions": [
+  0.01,
+  0.02,
+  0.03,
+  0.05,
+  0.075,
+  0.1,
+  0.15,
+  0.2
+ ],
+ "levels": [
+  {
+   "id": "L1",
+   "description": "3 klaim, rawat 1–2 hari",
+   "baseRate": 0.012,
+   "recall": [
+    0.79,
+    0.998,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "precision": [
+    0.948,
+    0.599,
+    0.4,
+    0.24,
+    0.16,
+    0.12,
+    0.08,
+    0.06
+   ],
+   "legitInQueue": [
+    0.007,
+    0.097,
+    0.214,
+    0.433,
+    0.674,
+    0.857,
+    0.996,
+    1.0
+   ]
+  },
+  {
+   "id": "L2",
+   "description": "2 klaim, rawat 2–3 hari",
+   "baseRate": 0.008,
+   "recall": [
+    0.631,
+    0.819,
+    0.909,
+    0.975,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "precision": [
+    0.505,
+    0.328,
+    0.242,
+    0.156,
+    0.107,
+    0.08,
+    0.053,
+    0.04
+   ],
+   "legitInQueue": [
+    0.061,
+    0.165,
+    0.275,
+    0.495,
+    0.712,
+    0.867,
+    0.998,
+    1.0
+   ]
+  },
+  {
+   "id": "L3",
+   "description": "2 klaim, rawat 3–4 hari",
+   "baseRate": 0.008,
+   "recall": [
+    0.353,
+    0.537,
+    0.647,
+    0.822,
+    0.891,
+    0.975,
+    1.0,
+    1.0
+   ],
+   "precision": [
+    0.282,
+    0.215,
+    0.172,
+    0.132,
+    0.095,
+    0.078,
+    0.053,
+    0.04
+   ],
+   "legitInQueue": [
+    0.089,
+    0.193,
+    0.301,
+    0.51,
+    0.728,
+    0.875,
+    0.998,
+    1.0
+   ]
+  },
+  {
+   "id": "L4",
+   "description": "2 klaim, rawat normal",
+   "baseRate": 0.008,
+   "recall": [
+    0.019,
+    0.062,
+    0.091,
+    0.228,
+    0.512,
+    0.781,
+    0.997,
+    1.0
+   ],
+   "precision": [
+    0.015,
+    0.025,
+    0.024,
+    0.036,
+    0.055,
+    0.062,
+    0.053,
+    0.04
+   ],
+   "legitInQueue": [
+    0.122,
+    0.239,
+    0.353,
+    0.555,
+    0.753,
+    0.883,
+    0.999,
+    1.0
+   ]
+  }
+ ],
+ "benchmark": {
+  "machine": "2 vCPU, 8 GB",
+  "includesDatabaseWrites": false,
+  "runs": [
+   {
+    "rows": 1530000,
+    "topupShare": 0.03,
+    "seconds": 6.5,
+    "peakGb": 1.07
+   },
+   {
+    "rows": 1000000,
+    "topupShare": 1.0,
+    "seconds": 38.7,
+    "peakGb": 2.2
+   }
+  ]
+ },
+ "source": "tools/stress_test.py (20 seeds, 2,000 claims) and tools/benchmark.py; synthetic data only"
+}

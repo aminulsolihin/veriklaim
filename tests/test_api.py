@@ -1,6 +1,8 @@
 """The API: sign-in, roles, the review workflow, uploads, reference prices, the audit log."""
 import io
 
+from fastapi.testclient import TestClient
+
 from tests.conftest import HEADERS
 
 
@@ -202,3 +204,26 @@ def test_pages_and_security_headers(server):
     assert server.get("/assets/js/app.js").status_code == 200
     assert server.get("/assets/sample/veriklaim-sample-eklaim.txt").status_code == 200
     assert server.get("/api/nope").status_code == 404
+
+
+def test_robustness_requires_login_and_matches_the_published_figures(server, verifikator):
+    anon = TestClient(server.app)
+    assert anon.get("/api/robustness", headers=HEADERS).status_code == 401
+    d = verifikator.get("/api/robustness").json()
+    assert d["n"] == 2000 and d["seeds"] == 20
+    assert [lv["id"] for lv in d["levels"]] == ["L1", "L2", "L3", "L4"]
+    i5 = d["fractions"].index(0.05)
+    # the numbers shown on slide 13 (recall at 5% workload) and the scale runs
+    assert [round(lv["recall"][i5] * 100, 1) for lv in d["levels"]] == [100.0, 97.5, 82.2, 22.8]
+    assert [r["rows"] for r in d["benchmark"]["runs"]] == [1530000, 1000000]
+    for lv in d["levels"]:
+        n = len(d["fractions"])
+        assert len(lv["recall"]) == len(lv["precision"]) == len(lv["legitInQueue"]) == n
+        assert all(0 <= v <= 1 for v in lv["recall"])
+        assert lv["recall"] == sorted(lv["recall"])  # more workload never lowers recall
+
+
+def test_robustness_is_open_to_judge_sessions(server):
+    from tests.test_judge import _guest
+    c, _ = _guest(server)
+    assert c.get("/api/robustness").status_code == 200

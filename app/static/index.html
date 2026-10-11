@@ -25,6 +25,7 @@
     <a href="#/queue" data-route="queue">Antrean</a>
     <a href="#/batches" data-route="batches">Batch</a>
     <a href="#/refs" data-route="refs">Harga acuan</a>
+    <a href="#/robust" data-route="robust">Ketahanan</a>
     <a href="#/audit" data-route="audit" data-role="audit">Jejak audit</a>
     <a href="#/feedback" data-route="feedback">Umpan balik</a>
     <a href="#/about" data-route="about">Tentang</a>
@@ -93,6 +94,7 @@
     <div id="queueBody" class="stack">
       <section class="panel tour" id="tour" hidden aria-labelledby="tourTitle"></section>
       <p class="notice" id="labelNote" hidden></p>
+      <p class="notice" id="refNote" hidden><b>Harga acuan contoh.</b> Harga bawaan prototype ini ilustratif, bukan data e-Katalog. Kelipatan tagihan dan nilai rupiah di halaman ini menunjukkan cara kerja, bukan harga sebenarnya. <a href="#/refs">Lihat tabel harga acuan</a>.</p>
 
       <ol class="pipe" id="pipe" aria-label="Tahap penyaringan"></ol>
 
@@ -157,6 +159,17 @@
           </table>
         </div>
       </section>
+
+      <section class="panel" id="codePanel">
+        <header><h2>Tingkat flag per kode top-up</h2></header>
+        <p class="lede">Pemantauan yang sama menurut item top-up. Obat khusus tertentu memang diberikan berulang dan penggantian sendi bisa dua sisi, jadi kode dengan tingkat flag tinggi perlu dilihat bersama alasannya sebelum ambangnya diubah.</p>
+        <div class="tblwrap">
+          <table>
+            <thead><tr><th>Kode · item</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
+            <tbody id="codeRows"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </section>
 
@@ -170,7 +183,7 @@
 
     <form class="panel pad" id="uploadForm">
       <h2>Saring berkas baru</h2>
-      <p class="warn">Unggah hanya berkas sintetis, atau berkas anonim dengan izin resmi. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.</p>
+      <p class="warn" id="upWarn">Unggah hanya berkas sintetis, atau berkas anonim dengan izin resmi. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.</p>
       <div class="formgrid">
         <div class="field">
           <label for="upFile">Ekspor TXT biasa dari E-Klaim</label>
@@ -248,6 +261,42 @@
       </div>
       <p class="msg" id="refMsg" role="status"></p>
     </form>
+  </section>
+
+  <!-- ketahanan -->
+  <section id="view-robust" class="stack" hidden>
+    <div class="mast"><div>
+      <p class="eyebrow">Ketahanan</p>
+      <h1>Seberapa tahan penyaringan pada data yang lebih sulit?</h1>
+      <p class="sub">Sampel 80 klaim sengaja dibuat bersih. Di sini model diuji pada <span id="rbN">2.000</span> klaim sintetis yang memuat pengulang yang sah, dan waktu prosesnya diukur pada berkas besar. Semua data sintetis; ini bukan akurasi pada klaim riil.</p>
+    </div></div>
+
+    <section class="panel">
+      <header><h2>Pola bermasalah yang masuk antrean, menurut beban pemeriksaan</h2></header>
+      <p class="lede">Tegak: porsi pola bermasalah yang ikut diperiksa. Mendatar: porsi klaim top-up yang diperiksa. Garis putus-putus adalah pemeriksaan acak. L1 serupa dengan sampel 80 klaim; makin besar angkanya, makin mirip pola itu dengan pengulang yang sah.</p>
+      <div class="legend" id="rbLegend"></div>
+      <div class="chart" id="rbChart"></div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Pada beban pemeriksaan 5%</h2></header>
+      <p class="lede">Presisi dibanding proporsi pola dalam data memberi kelipatan terhadap pemeriksaan acak. Pengulang yang sah yang ikut masuk antrean menunjukkan mengapa keputusan tetap pada verifikator.</p>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Pola dalam simulasi</th><th class="r">Rekal</th><th class="r">Presisi</th><th class="r">× acak</th><th class="r">Pengulang sah yang masuk antrean</th></tr></thead>
+          <tbody id="rbRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="kpis three" id="rbBench" aria-label="Waktu proses pada berkas besar"></section>
+
+    <dl class="notes">
+      <div><dt>Cara data dibuat</dt><dd>Delapan kelompok top-up berulang disisipkan pada empat tingkat kesulitan, dan sekitar <span id="rbShare">8%</span> klaim adalah pengulang yang sah: penggantian sendi dua sisi berjarak sekitar sepuluh minggu, atau tiga klaim berjarak 30 hari, dengan lama rawat normal. Hasilnya rata-rata <span id="rbSeeds">20</span> seed acak.</dd></div>
+      <div><dt>Yang tidak bisa dibedakan</dt><dd>Pada L4, dua klaim berjarak 70 hari dengan lama rawat dan tagihan normal identik dengan penggantian sendi dua sisi yang sah. Keempat fitur tidak dapat membedakannya; itu butuh pencocokan rekam medis, bukan model yang lebih besar.</dd></div>
+      <div><dt>Waktu proses</dt><dd>Mencakup pembacaan berkas, penilaian, peringkat, dan penjelasan, pada mesin <span id="rbMachine">2 vCPU, 8 GB</span>. Penulisan ke basis data tidak termasuk. Demo ini membatasi satu unggahan pada <span id="rbMax">2.000</span> klaim karena server gratis.</dd></div>
+      <div><dt>Jalankan ulang</dt><dd><span class="num">python tools/stress_test.py</span> dan <span class="num">python tools/benchmark.py 1530000 0.03</span> ada di paket aplikasi. Angkanya terikat pada seed yang sama, jadi hasilnya identik.</dd></div>
+    </dl>
   </section>
 
   <!-- jejak audit -->
@@ -357,6 +406,7 @@
       <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas.</dd></div>
       <div><dt>Data sintetis</dt><dd>Empat belas dari 80 klaim disisipi pola agar halaman bisa menghitung apa yang ditangkap tiap lapisan. Polanya lebih bersih daripada klaim nyata, jadi angka ini menunjukkan logika bekerja, bukan perkiraan kinerja. Satu klaim fiktif sengaja dibuat tampak wajar pada keempat fitur dan memang tidak tertangkap.</dd></div>
       <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan.</dd></div>
+      <div><dt>Ketahanan dan skala</dt><dd>Halaman Ketahanan menampilkan hasil simulasi 2.000 klaim sintetis dengan pengulang yang sah, dan waktu proses pada berkas besar. Pada pola yang mirip pengulang sah, presisi rendah; angka-angka itu menunjukkan batas penyaringan, bukan kinerja pada klaim riil.</dd></div>
       <div><dt>Mode juri</dt><dd>Tombol "Coba sebagai juri" membuat sesi tamu tanpa kata sandi dengan salinan data sintetis sendiri. Tamu dapat memeriksa, memutuskan, mengatur kapasitas, mengunggah berkas, dan melihat jejak auditnya sendiri; tamu tidak dapat mengubah harga acuan atau melihat data orang lain. Sesi dan datanya dihapus otomatis.</dd></div>
       <div><dt>Cakupan</dt><dd>Kategori 2, Efisiensi Risiko pada Fasilitas Kesehatan: Manipulasi Obat &amp; Alkes serta Phantom &amp; Repeat Billing, mengacu pada Panduan Peserta Healthkathon 2026 dan Permenkes No. 16/2019.</dd></div>
     </dl>

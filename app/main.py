@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import os
 import re
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from functools import lru_cache
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -56,7 +58,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="VeriKlaim", version="0.4.0", lifespan=lifespan,
+    title="VeriKlaim", version="0.5.0", lifespan=lifespan,
     docs_url=None if settings.production else "/api/docs", redoc_url=None,
     openapi_url=None if settings.production else "/api/openapi.json",
 )
@@ -193,6 +195,20 @@ def config():
         "judgeMode": settings.judge_mode,
         "guestHours": settings.guest_hours,
     }
+
+
+@lru_cache(maxsize=1)
+def _robustness() -> dict:
+    return json.loads((settings.data_dir / "robustness.json").read_text(encoding="utf-8"))
+
+
+@app.get("/api/robustness")
+def robustness(user: User = Depends(current_user)):
+    """Results of tools/stress_test.py and tools/benchmark.py (synthetic data), shown on the Ketahanan page."""
+    try:
+        return _robustness()
+    except (OSError, ValueError):
+        raise HTTPException(404, "Data ketahanan tidak tersedia pada instalasi ini.")
 
 
 class LoginIn(BaseModel):
