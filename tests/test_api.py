@@ -227,3 +227,51 @@ def test_robustness_is_open_to_judge_sessions(server):
     from tests.test_judge import _guest
     c, _ = _guest(server)
     assert c.get("/api/robustness").status_code == 200
+
+
+def test_special_cmg_catalogue_lists_every_official_code_and_price_coverage(server, verifikator):
+    assert TestClient(server.app).get("/api/special-cmg").status_code == 401
+    d = verifikator.get("/api/special-cmg").json()
+    codes = [c["code"] for c in d["codes"]]
+    assert d["total"] == len(codes) == len(set(codes)) == 16
+    assert sorted(c for c in codes if c.startswith("DD")) == ["DD%02d" % i for i in range(1, 12)]
+    assert sorted(c for c in codes if c.startswith("RR")) == ["RR%02d" % i for i in range(1, 6)]
+    assert all(c["kind"] == ("SD" if c["code"].startswith("DD") else "SR") for c in d["codes"])
+    by = {c["code"]: c for c in d["codes"]}
+    assert by["RR04"]["priced"] and by["RR04"]["price"] > 0 and not by["RR02"]["priced"]
+    assert d["priced"] == sum(1 for c in d["codes"] if c["priced"])
+    assert "26 Tahun 2021" in d["source"]
+
+
+def test_start_up_refreshes_only_untouched_english_placeholder_sources(server):
+    from app import services
+    from app.db import ReferencePrice, SessionLocal
+    old = "Placeholder (production: LKPP e-Katalog)"
+    with SessionLocal() as db:
+        row = db.get(ReferencePrice, "RR04")
+        keep = (row.source, row.updated_by)
+        try:
+            row.source, row.updated_by = old, "supervisor"  # someone edited it: leave it alone
+            db.commit()
+            services.seed(db)
+            assert db.get(ReferencePrice, "RR04").source == old
+            row.updated_by = "system"
+            db.commit()
+            services.seed(db)
+            assert db.get(ReferencePrice, "RR04").source.startswith("Contoh ilustratif")
+        finally:
+            row = db.get(ReferencePrice, "RR04")
+            row.source, row.updated_by = keep
+            db.commit()
+
+
+def test_judge_sign_in_limit_is_generous_enough_for_a_shared_office_address():
+    from app.config import settings
+    assert settings.guest_logins_per_ip_hour >= 30
+
+
+def test_csv_main_driver_is_in_indonesian(verifikator):
+    b = _sample_batch(verifikator)
+    text = verifikator.get("/api/batches/{}/export.csv".format(b["id"])).text
+    assert "Hospital bill" not in text and "Repeat top-up" not in text
+    assert any(d in text for d in ("Tagihan RS", "Lama rawat", "Top-up berulang", "Volume top-up"))

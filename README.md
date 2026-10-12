@@ -110,7 +110,7 @@ All settings are environment variables, read once at start-up.
 | `JUDGE_MODE` | `1` | Enable the guest button and guest sessions. `0` disables them. |
 | `GUEST_HOURS` | `24` | Lifetime of a guest session and its data. |
 | `MAX_GUESTS` | `300` | Guest sessions alive at once. |
-| `GUEST_LOGINS_PER_IP_HOUR` | `10` | New guest sessions per client address per hour. |
+| `GUEST_LOGINS_PER_IP_HOUR` | `60` | New guest sessions per client address per hour. Kept generous because several reviewers can share one office address. |
 | `GUEST_MAX_BATCHES` | `5` | Batches one guest may hold. |
 
 ## API
@@ -126,6 +126,7 @@ the API never allows.
 | Batches | `GET`/`POST /api/batches`, `GET`/`PATCH`/`DELETE /api/batches/{id}`, `GET /api/batches/{id}/export.csv` |
 | Claims | `GET /api/claims/{id}`, `PUT /api/claims/{id}/review` |
 | Reference prices | `GET /api/reference-prices`, `PUT`/`DELETE /api/reference-prices/{code}` |
+| Special CMG catalogue | `GET /api/special-cmg` (the 16 codes in Permenkes 26/2021, with whether each has a reference price) |
 | Governance | `GET /api/audit`, `GET`/`POST /api/feedback`, `GET /api/feedback.csv`, `GET /api/usage` |
 | Evaluation | `GET /api/robustness` |
 
@@ -140,7 +141,7 @@ pytest                                                                 # SQLite 
 TEST_DATABASE_URL=postgresql://user@localhost/veriklaim_test pytest    # the same suite on Postgres
 ```
 
-The suite has 38 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
+The suite has 42 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
 checks, the review workflow, judge-mode isolation and expiry, and the robustness endpoint.
 
 ## Deployment
@@ -261,7 +262,7 @@ app/
   db.py            SQLAlchemy models
   security.py      password hashing, card tokens, sign-in limiter
   config.py        settings from environment variables
-  data/            synthetic sample, its labels, robustness figures
+  data/            synthetic sample, its labels, robustness figures, Special CMG code list
   static/          index.html, assets/styles.css, assets/js/app.js
 tests/             parser, model, API and judge-mode tests
 tools/

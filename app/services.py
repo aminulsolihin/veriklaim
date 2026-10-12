@@ -21,10 +21,15 @@ log = logging.getLogger("veriklaim")
 # Placeholder reference prices so the sample can be screened. They are not catalogue data.
 DEFAULT_REFERENCE_PRICES = [
     {"code": "RR04", "kind": "SR", "description": "Hip implant / knee implant", "price": 25_000_000,
-     "source": "Placeholder (production: LKPP e-Katalog)"},
+     "source": "Contoh ilustratif (produksi: e-Katalog LKPP)"},
     {"code": "DD01", "kind": "SD", "description": "Streptokinase", "price": 4_000_000,
-     "source": "Placeholder (production: e-Fornas / e-Katalog)"},
+     "source": "Contoh ilustratif (produksi: e-Fornas / e-Katalog)"},
 ]
+# Source strings written by earlier versions, refreshed on start-up when nobody has edited the row.
+_OLD_SOURCES = {
+    "RR04": "Placeholder (production: LKPP e-Katalog)",
+    "DD01": "Placeholder (production: e-Fornas / e-Katalog)",
+}
 DEMO_USERS = [
     {"username": "verifikator", "name": "Verifikator (demo)", "role": "verifikator", "env": "verifikator_password"},
     {"username": "supervisor", "name": "Supervisor (demo)", "role": "supervisor", "env": "supervisor_password"},
@@ -127,6 +132,11 @@ def seed(db: Session) -> None:
                 user.password_hash = hash_password(password)
     if db.scalar(select(func.count()).select_from(ReferencePrice)) == 0:
         db.add_all([ReferencePrice(**r) for r in DEFAULT_REFERENCE_PRICES])
+    else:
+        for r in DEFAULT_REFERENCE_PRICES:
+            row = db.get(ReferencePrice, r["code"])
+            if row is not None and row.updated_by == "system" and row.source == _OLD_SOURCES.get(r["code"]):
+                row.source = r["source"]
     db.commit()
 
     team_batches = db.scalar(select(func.count()).select_from(Batch).where(Batch.owner.is_(None)))

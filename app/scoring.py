@@ -19,10 +19,10 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 
 FEATURES = [
-    {"key": "cover", "label": "Hospital bill vs reference price"},
-    {"key": "los", "label": "Length of stay vs same INA-CBG"},
-    {"key": "repeat", "label": "Same top-up, same card, within 90 days"},
-    {"key": "vol", "label": "Hospital volume of this top-up vs peers"},
+    {"key": "cover", "label": "Tagihan RS vs harga acuan"},
+    {"key": "los", "label": "Lama rawat vs INA-CBG sama"},
+    {"key": "repeat", "label": "Top-up sama, kartu sama, 90 hari"},
+    {"key": "vol", "label": "Volume top-up RS vs sejawat"},
 ]
 N_FEATURES = len(FEATURES)
 N_TREES = 200

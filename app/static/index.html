@@ -227,9 +227,20 @@
 
     <section class="panel">
       <div class="tblwrap">
-        <table>
+        <table class="cardrows">
           <thead><tr><th>Special CMG</th><th>Item</th><th>Jenis</th><th class="r">Harga acuan</th><th>Sumber</th><th>Diperbarui</th><th></th></tr></thead>
           <tbody id="refRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel pad" id="cmgPanel" hidden>
+      <h2>Kode Special CMG yang berlaku</h2>
+      <p class="sub" id="cmgSub"></p>
+      <div class="tblwrap">
+        <table class="cardrows">
+          <thead><tr><th>Kode</th><th>Item</th><th>Jenis</th><th>Status harga acuan</th><th></th></tr></thead>
+          <tbody id="cmgRows"></tbody>
         </table>
       </div>
     </section>
@@ -404,8 +415,10 @@
       <div><dt>Privasi (UU PDP)</dt><dd>NAMA_PASIEN, MRN, dan BIRTH_DATE tidak pernah dibaca. NOKARTU diganti token satu arah sebelum disimpan, dan berkas mentah tidak disimpan. Gunakan hanya data sintetis, atau data anonim dengan izin resmi.</dd></div>
       <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas.</dd></div>
       <div><dt>Data sintetis</dt><dd>Empat belas dari 80 klaim disisipi pola agar halaman bisa menghitung apa yang ditangkap tiap lapisan. Polanya lebih bersih daripada klaim nyata, jadi angka ini menunjukkan logika bekerja, bukan perkiraan kinerja. Satu klaim fiktif sengaja dibuat tampak wajar pada keempat fitur dan memang tidak tertangkap.</dd></div>
-      <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan.</dd></div>
+      <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan. Daftar lengkap kode Special CMG ada di halaman Harga acuan.</dd></div>
       <div><dt>Ketahanan dan skala</dt><dd>Halaman Ketahanan menampilkan hasil simulasi 2.000 klaim sintetis dengan pengulang yang sah, dan waktu proses pada berkas besar. Pada pola yang mirip pengulang sah, presisi rendah; angka-angka itu menunjukkan batas penyaringan, bukan kinerja pada klaim riil.</dd></div>
+      <div><dt>AI hanya di tempat yang membutuhkannya</dt><dd>Pemeriksaan harga memakai aturan sederhana yang bisa dihitung ulang siapa pun. Isolation Forest dipakai hanya untuk pola antarklaim, karena label kecurangan tidak tersedia. Alasan per flag dihitung eksak dengan nilai Shapley, bukan diperkirakan. Tidak ada model bahasa besar dalam alur penilaian.</dd></div>
+      <div><dt>Tata kelola</dt><dd>Verifikator memutuskan setiap flag. Pada akun tim, hanya supervisor yang dapat mengubah harga acuan, ambang, dan panjang antrean; sesi tamu hanya dapat mengatur ambang dan panjang antrean pada salinan miliknya. Perubahan harga acuan dan ambang menyimpan nilai sebelum dan sesudah di jejak audit, bersama pengguna dan waktunya.</dd></div>
       <div><dt>Mode juri</dt><dd>Tombol "Coba sebagai juri" membuat sesi tamu tanpa kata sandi dengan salinan data sintetis sendiri. Tamu dapat memeriksa, memutuskan, mengatur kapasitas, mengunggah berkas, dan melihat jejak auditnya sendiri; tamu tidak dapat mengubah harga acuan atau melihat data orang lain. Sesi dan datanya dihapus otomatis.</dd></div>
       <div><dt>Cakupan</dt><dd>Kategori 2, Efisiensi Risiko pada Fasilitas Kesehatan: Manipulasi Obat &amp; Alkes serta Phantom &amp; Repeat Billing, mengacu pada Panduan Peserta Healthkathon 2026 dan Permenkes No. 16/2019.</dd></div>
     </dl>

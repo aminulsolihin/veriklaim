@@ -524,7 +524,7 @@ $('uploadForm').addEventListener('submit',async e=>{
 
 /* ---------- harga acuan ---------- */
 function setRefNote(list){
-  S.refPlaceholder=list.some(r=>/^placeholder/i.test(r.source||''));
+  S.refPlaceholder=list.some(r=>/^(placeholder|contoh)/i.test(r.source||''));
   $('refNote').hidden=!S.refPlaceholder;
 }
 async function refreshRefNote(){
@@ -539,7 +539,23 @@ async function openRefs(){
     <td>${esc(when(r.updatedAt))}<span class="sm">oleh ${esc(r.updatedBy)}</span></td>
     <td class="act">${sup?`<button type="button" class="btn small ghost" data-edit="${esc(r.code)}">Ubah</button> <button type="button" class="btn small danger" data-del="${esc(r.code)}">Hapus</button>`:''}</td></tr>`).join('')
     ||'<tr><td colspan="7">Belum ada harga acuan. Tanpa harga acuan, tidak ada klaim yang bisa disaring.</td></tr>';
+  try{await openCmg(sup)}catch(_){$('cmgPanel').hidden=true}
 }
+async function openCmg(sup){
+  const d=await api('GET','/api/special-cmg'); S.cmg=d.codes;
+  $('cmgSub').textContent=`${d.priced} dari ${d.total} kode punya harga acuan. Harga bawaan prototype masih contoh ilustratif. Klaim dengan kode lain dilewati saat penyaringan sampai supervisor mengisi harganya. Daftar mengikuti ${d.source}.`;
+  $('cmgRows').innerHTML=d.codes.map(c=>`<tr>
+    <td class="num">${esc(c.code)}</td><td>${esc(c.description)}</td><td>${esc(c.type)}</td>
+    <td>${c.priced?`Ada · ${esc(rp(c.price))}`:'<b>Belum ada harga acuan</b>'}</td>
+    <td class="act">${sup&&!c.priced?`<button type="button" class="btn small ghost" data-fill="${esc(c.code)}">Isi harga</button>`:''}</td></tr>`).join('');
+  $('cmgPanel').hidden=false;
+}
+$('cmgRows').addEventListener('click',e=>{
+  const b=e.target.closest('[data-fill]'); if(!b) return;
+  const c=(S.cmg||[]).find(x=>x.code===b.dataset.fill); if(!c) return;
+  $('refCode').value=c.code; $('refKind').value=c.kind; $('refDesc').value=c.description; $('refPrice').value=''; $('refSource').value='';
+  $('refMsg').textContent='Mengisi '+c.code+'. Masukkan harga dan sumbernya.'; $('refForm').scrollIntoView({behavior:'smooth',block:'center'}); $('refPrice').focus();
+});
 $('refRows').addEventListener('click',async e=>{
   const ed=e.target.closest('[data-edit]'), del=e.target.closest('[data-del]');
   if(ed){

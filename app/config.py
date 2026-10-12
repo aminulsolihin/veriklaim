@@ -61,7 +61,6 @@ class Settings:
         self.min_claims = 20
         self.seed_sample = os.getenv("SEED_SAMPLE", "1").strip() != "0"
         self.session_hours = _int("SESSION_HOURS", 8)
-        # Firebase Hosting passes only a cookie named __session through to Cloud Run.
         self.session_cookie = os.getenv("SESSION_COOKIE", "").strip() or "vk_session"
 
         # Judge mode: a "try without an account" button that gives each visitor a private copy of
@@ -69,7 +68,7 @@ class Settings:
         self.judge_mode = os.getenv("JUDGE_MODE", "1").strip() != "0"
         self.guest_hours = _int("GUEST_HOURS", 24)
         self.max_guests = _int("MAX_GUESTS", 300)
-        self.guest_logins_per_ip_hour = _int("GUEST_LOGINS_PER_IP_HOUR", 10)
+        self.guest_logins_per_ip_hour = _int("GUEST_LOGINS_PER_IP_HOUR", 60)
         self.guest_max_batches = _int("GUEST_MAX_BATCHES", 5)
 
         self.static_dir = BASE_DIR / "static"

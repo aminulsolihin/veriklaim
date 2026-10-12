@@ -431,7 +431,7 @@ def batch_export(
     thr = thr if thr is not None else batch.threshold_pct
     k = k if k is not None else batch.top_k
     claims = db.scalars(select(Claim).where(Claim.batch_id == batch_id).order_by(Claim.rank)).all()
-    drivers = ["Hospital bill", "Length of stay", "Repeat top-up", "Top-up volume"]
+    drivers = ["Tagihan RS", "Lama rawat", "Top-up berulang", "Volume top-up"]
     buf = io.StringIO()
     w = csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
     w.writerow(["SEP", "KODE_RS", "KELAS_RS", "KODE_TARIF", "INACBG", "SPECIAL_CMG", "TARIF_RS", "REFERENCE_PRICE",
@@ -445,7 +445,7 @@ def batch_export(
         if view == "flagged" and not (rule or model):
             continue
         phi = c.phi or [None] * 4
-        driver = drivers[max(range(4), key=lambda i: phi[i])] if (model and c.phi) else ("Hospital bill" if rule else "")
+        driver = drivers[max(range(4), key=lambda i: phi[i])] if (model and c.phi) else ("Tagihan RS" if rule else "")
         w.writerow([_csv_cell(v) for v in [
             c.sep, c.kode_rs, c.kelas_rs, c.kode_tarif, c.inacbg, c.cmg_final or c.cmg_code, c.tarif_rs, c.ref_price,
             "%.3f" % c.cover, c.los, "%g" % c.los_median, c.repeat_n, "%.3f" % c.vol_ratio, "%.4f" % c.score, c.rank,
@@ -517,6 +517,25 @@ def ref_out(r: ReferencePrice) -> dict:
 @app.get("/api/reference-prices")
 def list_refs(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return [ref_out(r) for r in db.scalars(select(ReferencePrice).order_by(ReferencePrice.code))]
+
+
+@lru_cache(maxsize=1)
+def _special_cmg() -> dict:
+    return json.loads((settings.data_dir / "special_cmg.json").read_text(encoding="utf-8"))
+
+
+@app.get("/api/special-cmg")
+def special_cmg(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """The official Special CMG codes (Special Drug and Special Prosthesis) and whether each has a reference price."""
+    try:
+        catalog = _special_cmg()
+    except (OSError, ValueError):
+        raise HTTPException(404, "Daftar kode Special CMG tidak tersedia pada instalasi ini.")
+    prices = {r.code: r.price for r in db.scalars(select(ReferencePrice))}
+    codes = [{**c, "type": eklaim.KIND_NAMES.get(c["kind"], c["kind"]), "priced": c["code"] in prices,
+              "price": prices.get(c["code"])} for c in catalog["codes"]]
+    return {"source": catalog["source"], "codes": codes,
+            "total": len(codes), "priced": sum(1 for c in codes if c["priced"])}
 
 
 class RefIn(BaseModel):

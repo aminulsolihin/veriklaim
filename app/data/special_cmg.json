@@ -1,0 +1,21 @@
+{
+  "source": "Permenkes No. 26 Tahun 2021, Lampiran Bab II huruf B (Pembayaran Tambahan / Top Up), Tabel Special CMG",
+  "codes": [
+    {"code": "DD01", "kind": "SD", "description": "Streptokinase"},
+    {"code": "DD02", "kind": "SD", "description": "Deferiprone"},
+    {"code": "DD03", "kind": "SD", "description": "Deferoksamin"},
+    {"code": "DD04", "kind": "SD", "description": "Deferasirox"},
+    {"code": "DD05", "kind": "SD", "description": "Human albumin untuk septikemia"},
+    {"code": "DD06", "kind": "SD", "description": "Faktor anti-hemofilia"},
+    {"code": "DD07", "kind": "SD", "description": "Deferiprone (kelompok Q-5-44)"},
+    {"code": "DD08", "kind": "SD", "description": "Deferoksamin (kelompok Q-5-44)"},
+    {"code": "DD09", "kind": "SD", "description": "Deferasirox (kelompok Q-5-44)"},
+    {"code": "DD10", "kind": "SD", "description": "Faktor anti-hemofilia (kelompok Q-5-44)"},
+    {"code": "DD11", "kind": "SD", "description": "Human albumin untuk luka bakar"},
+    {"code": "RR01", "kind": "SR", "description": "Subdural grid electrode"},
+    {"code": "RR02", "kind": "SR", "description": "Cote graft"},
+    {"code": "RR03", "kind": "SR", "description": "Prostesis sendi temporomandibular (TMJ)"},
+    {"code": "RR04", "kind": "SR", "description": "Hip implant / knee implant"},
+    {"code": "RR05", "kind": "SR", "description": "Prostesis EVAR/TEVAR"}
+  ]
+}
