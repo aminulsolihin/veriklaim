@@ -14,6 +14,7 @@ VeriKlaim is a prototype built by Team Bill Buster for BPJS Kesehatan Healthkath
 
 - [Overview](#overview)
 - [How screening works](#how-screening-works)
+- [Upcoding indicators](#upcoding-indicators)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [API](#api)
@@ -39,6 +40,7 @@ claims that carry such a top-up, and ranks them for review.
 | Explanations | Exact Shapley values per claim, with a plain-language reason and the next document to check. |
 | Review workflow | Decisions (confirmed, cleared, documents requested), notes, and the hospital's response, stored per claim. |
 | Monitoring | Flag rate per hospital and per top-up code, to surface systematic bias. |
+| Upcoding indicators | A separate **Koding** page that ranks claims coded INA-CBG severity II or III whose care does not support the level, with a hospital-level pattern view. It flags indicators; it does not judge medical necessity. |
 | Evaluation | A page with the robustness curve and timing on large files, backed by reproducible scripts. |
 | Judge mode | One-click guest sessions, each with a private copy of the synthetic sample and a guided checklist. |
 | Governance | Role-based access, an audit log of every state change, CSV export of the queue. |
@@ -70,6 +72,56 @@ and a selected claim opens as a full-screen sheet. Fonts (Plus Jakarta Sans) loa
 
 Limits: a file needs at least 20 top-up claims, and at most `MAX_CLAIMS` (default 2,000) are screened.
 Claims whose top-up code has no reference price are skipped and counted on the batch.
+
+## Upcoding indicators
+
+An INA-CBG code ends in a severity level (I, II or III) that the grouper derives from the diagnoses and
+procedures entered, and a higher level pays a higher tariff. The **Koding** page asks one narrow question
+of every claim coded II or III: *is that level supported by the rest of the claim, and by what other
+hospitals do for the same case group?*
+
+**What it does not do.** It does not judge whether care was medically necessary. That needs the medical
+record and a medical verifier. It ranks claims for that review and says why.
+
+| Stage | What happens |
+|---|---|
+| Case groups | Claims are compared only inside the same base group (for example `S-4-10`), and only when the file has enough claims at two or more severity levels. |
+| Support | A claim is *supported* when ICU, a ventilator or death explains the level, or its stay looks like that of claims at that level or higher. A claim coded III with the stay of a level I claim is not. |
+| Coding rule | Coded II or III, at least two more secondary diagnoses than the care shown normally carries, no ICU or ventilator, and a stay no longer than the lowest level's median. |
+| Hospital pattern | Observed against expected II/III claims per hospital, where expected comes from the other hospitals in the same case groups, so a hospital with sicker patients is not penalised for case mix. Hospitals that stand out do not set the norm. A hospital is flagged only when its excess is significant (one-sided z at least 2.33) and its II/III claims are less supported than the median hospital's. A referral hospital whose high levels are backed by long stays, ICU or ventilator use shows as "Didukung perawatan", not "Perlu ditinjau". |
+| Anomaly layer | The same Isolation Forest and exact Shapley values as the top-up screen, over four one-sided features (hospital pattern, stay shorter than usual, secondary diagnoses beyond the care given, tariff uplift). Each feature is zero unless the claim looks *less* supported, so the forest isolates unsupported claims, not merely long or complex ones. Claims with all four features at zero rank last and are never queued to fill the list. |
+| Queue | Every claim that passes the coding rule, plus the highest-ranked claims up to the verifier capacity. A verifier records one of three decisions (upcoding confirmed, cleared, medical record requested). |
+
+Estimated tariff difference is the claim's tariff minus the median tariff at the lowest level in the same
+case group and hospital class. It is an estimate for sizing a review, not a loss.
+
+Reader: `app/coding.py` reads `SEP`, `KODE_RS`, `KELAS_RS`, `INACBG`, `DIAGLIST`, `PROCLIST`, `LOS`,
+`ICU_INDIKATOR`, `ICU_LOS`, `VENT_HOUR`, `DISCHARGE_STATUS` and `TARIF_INACBG`. Patient name, MRN, birth
+date and card number are not read and not stored.
+
+### Measurement on synthetic data
+
+`tools/make_coding_sample.py` writes an invented file of 1,087 claims from 24 hospitals: three hospitals
+that code 28 to 38% of their level-I-like claims as II or III, one that does so for 14% (and stretches the
+stay slightly), two class A referral hospitals that really do treat sicker patients, one with too few claims
+to compare, and 17 ordinary hospitals. `tools/benchmark_coding.py` repeats the whole thing over 20 random
+samples.
+
+| Planted rate | Top 20 by score | Top 40 | Queue (about 80 claims) precision / recall | Random, same size | Shortest stay vs level, same size |
+|---|---|---|---|---|---|
+| As shipped (about 43 planted claims) | 63% | 50% | 34% / 66% | 8% | 30% |
+| Half (about 20 planted claims) | 36% | 25% | 17% / 65% | 4% | 16% |
+
+At hospital level, in 20 samples: the strong upcoders were flagged "Perlu ditinjau" in 25 of 60 cases
+(the rest fell below the significance cut-off), the mild upcoder in none, the referral hospitals in none
+(33 of 40 shown as "Didukung perawatan"), and ordinary hospitals in none.
+
+How to read this. The planted pattern is generated by the same rules the check uses, so the figures show the
+code does what it was written to do. They are not an estimate for real claims. Two honest points inside
+them: the anomaly layer only modestly beats the plain "shortest stay for its level" ranking at the same
+size, and a single claim is weak evidence, since a claim coded II with the stay of a level I claim looks the
+same as an honest short stay. The hospital pattern is the stronger signal, and it needs claims from several
+hospitals in the same file (below five hospitals the page says the comparison is thin).
 
 ## Quick start
 
@@ -126,6 +178,7 @@ the API never allows.
 | Batches | `GET`/`POST /api/batches`, `GET`/`PATCH`/`DELETE /api/batches/{id}`, `GET /api/batches/{id}/export.csv` |
 | Claims | `GET /api/claims/{id}`, `PUT /api/claims/{id}/review` |
 | Reference prices | `GET /api/reference-prices`, `PUT`/`DELETE /api/reference-prices/{code}` |
+| Coding check | `GET`/`POST /api/coding/batches`, `GET`/`PATCH`/`DELETE /api/coding/batches/{id}`, `GET /api/coding/batches/{id}/export.csv`, `GET /api/coding/claims/{id}`, `PUT /api/coding/claims/{id}/review` |
 | Special CMG catalogue | `GET /api/special-cmg` (the 16 codes in Permenkes 26/2021, with whether each has a reference price) |
 | Governance | `GET /api/audit`, `GET`/`POST /api/feedback`, `GET /api/feedback.csv`, `GET /api/usage` |
 | Evaluation | `GET /api/robustness` |
@@ -141,8 +194,9 @@ pytest                                                                 # SQLite 
 TEST_DATABASE_URL=postgresql://user@localhost/veriklaim_test pytest    # the same suite on Postgres
 ```
 
-The suite has 42 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
-checks, the review workflow, judge-mode isolation and expiry, and the robustness endpoint.
+The suite has 71 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
+checks, the review workflow, judge-mode isolation and expiry, the robustness endpoint, and the upcoding
+check (reader, indicators, hospital pattern, API, isolation). It passes on SQLite and on Postgres.
 
 ## Deployment
 
@@ -259,16 +313,19 @@ app/
   services.py      ingest, explanations, audit entries, start-up seed
   eklaim.py        E-Klaim TXT reader
   scoring.py       features, Isolation Forest, Shapley values
+  coding.py        upcoding indicators: reader, case-group comparison, hospital pattern, features
   db.py            SQLAlchemy models
   security.py      password hashing, card tokens, sign-in limiter
   config.py        settings from environment variables
-  data/            synthetic sample, its labels, robustness figures, Special CMG code list
-  static/          index.html, assets/styles.css, assets/js/app.js
+  data/            synthetic samples and their labels, robustness figures, Special CMG code list
+  static/          index.html, assets/styles.css, assets/js/app.js (queue, shared helpers), coding.js (Koding page)
 tests/             parser, model, API and judge-mode tests
 tools/
   make_sample.js   regenerates the synthetic sample (Node)
   stress_test.py   2,000-claim robustness check with legitimate repeaters
   benchmark.py     read-and-score timing on a large synthetic file
+  make_coding_sample.py   regenerates the synthetic upcoding sample and its answer key
+  benchmark_coding.py     measures the upcoding check over many synthetic samples
 render.yaml        Render Blueprint
 .env.example       annotated environment template
 ```
@@ -287,3 +344,12 @@ render.yaml        Render Blueprint
 - **Hospital volume** is a raw count, not scaled to hospital size.
 - **Item-level price checks** need per-patient drug and device data from RME-based claims, which E-Klaim
   exports do not carry.
+- **BPJS Data Sample** (the FKRTL file) uses different variable names (`FKL…`). Its published data
+  dictionary lists no hospital identifier and may not carry the hospital's own bill, so the hospital-volume
+  feature and the bill-versus-price rule would need changes. No reader for that layout exists yet.
+- **Upcoding indicators are not a medical necessity review.** They flag claims whose severity level the
+  rest of the claim does not support; deciding whether care was needed takes the medical record and a
+  medical verifier. A single claim is weak evidence, and the hospital comparison needs several hospitals
+  in one file. The synthetic sample's upcoding is planted by the same rules the check uses, so its results
+  are not performance estimates. Stay and diagnosis norms come from the uploaded file, not a national
+  baseline, and a file that is mostly one hospital's claims has thin comparisons.

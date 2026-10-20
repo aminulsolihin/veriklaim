@@ -11,9 +11,9 @@ import numpy as np
 from sqlalchemy import delete, func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
-from . import eklaim, scoring
+from . import coding, eklaim, scoring
 from .config import settings
-from .db import AuditLog, Batch, Claim, ReferencePrice, User, utcnow
+from .db import AuditLog, Batch, Claim, CodingBatch, CodingClaim, ReferencePrice, User, utcnow
 from .security import card_token, hash_password, verify_password
 
 log = logging.getLogger("veriklaim")
@@ -143,8 +143,13 @@ def seed(db: Session) -> None:
     if settings.seed_sample and team_batches == 0:
         clone_batch(db, _template_batch(db), owner=None, uploaded_by="system")
         db.commit()
+    team_coding = db.scalar(select(func.count()).select_from(CodingBatch).where(CodingBatch.owner.is_(None)))
+    if settings.seed_sample and team_coding == 0:
+        clone_coding_batch(db, _coding_template(db), owner=None, uploaded_by="system")
+        db.commit()
     if settings.judge_mode:
         _template_batch(db)
+        _coding_template(db)
         purge_guests(db)
 
 
@@ -190,6 +195,7 @@ def create_guest(db: Session) -> User:
     db.add(user)
     db.flush()
     batch = clone_batch(db, template, owner=username, uploaded_by="system")
+    clone_coding_batch(db, _coding_template(db), owner=username, uploaded_by="system")
     audit(db, user, "demo_login", batch_id=batch.id)
     db.commit()
     return user
@@ -208,6 +214,8 @@ def purge_guests(db: Session) -> int:
     for user in old:
         for batch in db.scalars(select(Batch).where(Batch.owner == user.username)).all():
             delete_batch(db, batch)
+        for cbatch in db.scalars(select(CodingBatch).where(CodingBatch.owner == user.username)).all():
+            delete_coding_batch(db, cbatch)
         db.delete(user)
     if old:
         db.commit()
@@ -216,3 +224,106 @@ def purge_guests(db: Session) -> int:
 
 def count_guests(db: Session) -> int:
     return db.scalar(select(func.count()).select_from(User).where(User.role == GUEST_ROLE)) or 0
+
+
+# ---------- upcoding check ----------
+
+CODING_SAMPLE_NAME = "Sampel sintetis koding (1.087 klaim)"
+CODING_SAMPLE_FILE = "veriklaim-sample-koding.txt"
+_CODING_KEY = -1  # model cache key = _CODING_KEY * batch id, so it never collides with a top-up batch
+
+
+def _coding_claim_args(r: dict) -> dict:
+    out = {k: v for k, v in r.items() if k not in ("f", "ext")}
+    out["f1"], out["f2"], out["f3"], out["f4"] = r["f"]
+    return out
+
+
+def ingest_coding(db: Session, text: str, *, name: str, filename: str, user: Optional[User],
+                  labels: Optional[dict] = None, roles: Optional[dict] = None, owner: Optional[str] = None) -> CodingBatch:
+    """Parse and check one E-Klaim file for upcoding indicators. Raises eklaim.EklaimError for the user."""
+    parsed = coding.parse_coding(text)
+    rows = parsed["rows"]
+    if len(rows) < coding.MIN_ROWS:
+        raise eklaim.EklaimError(
+            "Hanya {} klaim di berkas ini yang dapat dibaca (kolom SEP dan INACBG berformat benar). "
+            "Pemeriksaan koding membutuhkan minimal {} klaim, karena klaim dibandingkan dengan kelompok kasus yang sama "
+            "di RS lain.".format(len(rows), coding.MIN_ROWS)
+        )
+    truncated = len(rows) > settings.max_claims
+    if truncated:
+        rows = rows[: settings.max_claims]
+    model, info = coding.screen(rows)
+    if info["groups"] == 0:
+        raise eklaim.EklaimError(
+            "Tidak ada kelompok kasus INA-CBG dengan cukup klaim di dua tingkat keparahan atau lebih untuk dibandingkan. "
+            "Gunakan berkas yang lebih besar, misalnya satu bulan klaim rawat inap dari beberapa RS."
+        )
+    hospitals = info["hospitals"]
+    for h in hospitals:
+        h.pop("queued", None)  # depends on the capacity setting; the page counts it
+        h["label"] = (roles or {}).get(h["rs"])
+    batch = CodingBatch(
+        name=name[:160], filename=filename[:200], uploaded_by=user.username if user else "system",
+        rows_total=parsed["total"], rows_read=len(rows), skipped_bad=parsed["bad"], truncated=truncated,
+        groups=info["groups"], compared=sum(1 for r in rows if r["tested"] and r["sev"] >= 2),
+        hospitals_n=len({r["kode_rs"] for r in rows}), top_k=coding.default_top_k(info["high"]),
+        base_score=model.base, labelled=bool(labels), hospitals=hospitals, owner=owner,
+    )
+    db.add(batch)
+    db.flush()
+    db.add_all([CodingClaim(batch_id=batch.id, label=(labels or {}).get(r["sep"]), **_coding_claim_args(r)) for r in rows])
+    audit(db, user, "coding_upload", batch_id=batch.id, detail={
+        "name": batch.name, "rows": parsed["total"], "read": len(rows), "unreadable": parsed["bad"],
+        "compared": batch.compared, "modul": "koding",
+    })
+    db.commit()
+    scoring.remember(_CODING_KEY * batch.id, model)
+    return batch
+
+
+def _coding_matrix(db: Session, batch_id: int) -> np.ndarray:
+    rows = db.execute(
+        select(CodingClaim.f1, CodingClaim.f2, CodingClaim.f3, CodingClaim.f4)
+        .where(CodingClaim.batch_id == batch_id).order_by(CodingClaim.pos)
+    ).all()
+    return np.array([list(r) for r in rows], dtype=float)
+
+
+def ensure_coding_phi(db: Session, claim: CodingClaim) -> Optional[list[float]]:
+    """Shapley values for one claim, computed on first use and then stored. A claim that looks fully
+    supported has all-zero features and nothing to explain."""
+    if claim.phi is not None or not claim.live:
+        return claim.phi
+    model = scoring.model_for(_CODING_KEY * claim.batch_id, lambda: _coding_matrix(db, claim.batch_id))
+    claim.phi = [float(x) for x in model.shapley([claim.pos])[0]]
+    db.commit()
+    return claim.phi
+
+
+def delete_coding_batch(db: Session, batch: CodingBatch) -> None:
+    db.execute(delete(CodingClaim).where(CodingClaim.batch_id == batch.id))
+    db.delete(batch)
+    scoring.forget(_CODING_KEY * batch.id)
+
+
+def _coding_template(db: Session) -> CodingBatch:
+    """The scored synthetic coding sample that guests and the team workspace start from."""
+    batch = db.scalar(select(CodingBatch).where(CodingBatch.owner == "system:template"))
+    if batch is None:
+        text = (settings.data_dir / "sample-coding.txt").read_text(encoding="utf-8")
+        key = json.loads((settings.data_dir / "sample-coding-labels.json").read_text(encoding="utf-8"))
+        batch = ingest_coding(db, text, name=CODING_SAMPLE_NAME, filename=CODING_SAMPLE_FILE, user=None,
+                              labels=key["claims"], roles=key["hospitals"], owner="system:template")
+    return batch
+
+
+def clone_coding_batch(db: Session, source: CodingBatch, *, owner: Optional[str], uploaded_by: str) -> CodingBatch:
+    cols = [c.key for c in sa_inspect(CodingBatch).mapper.column_attrs if c.key not in ("id", "owner", "uploaded_by", "uploaded_at")]
+    batch = CodingBatch(**{k: getattr(source, k) for k in cols}, owner=owner, uploaded_by=uploaded_by)
+    db.add(batch)
+    db.flush()
+    ccols = [c.key for c in sa_inspect(CodingClaim).mapper.column_attrs if c.key not in {"id", "batch_id"} | _REVIEW_FIELDS]
+    claims = db.scalars(select(CodingClaim).where(CodingClaim.batch_id == source.id)).all()
+    db.add_all([CodingClaim(batch_id=batch.id, **{k: getattr(c, k) for k in ccols}) for c in claims])
+    return batch

@@ -17,13 +17,13 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import db as db_module, eklaim, scoring, services
+from . import coding, db as db_module, eklaim, scoring, services
 from .config import settings
-from .db import AuditLog, Base, Batch, Claim, Feedback, ReferencePrice, SessionLocal, User, engine, get_db, iso, utcnow
+from .db import AuditLog, Base, Batch, Claim, CodingBatch, CodingClaim, Feedback, ReferencePrice, SessionLocal, User, engine, get_db, iso, utcnow
 from .security import DUMMY_HASH, LoginLimiter, login_limiter, verify_password
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="VeriKlaim", version="0.5.0", lifespan=lifespan,
+    title="VeriKlaim", version="0.6.0", lifespan=lifespan,
     docs_url=None if settings.production else "/api/docs", redoc_url=None,
     openapi_url=None if settings.production else "/api/openapi.json",
 )
@@ -192,6 +192,7 @@ def config():
         "maxClaims": settings.max_claims,
         "minClaims": settings.min_claims,
         "features": scoring.FEATURES,
+        "codingFeatures": coding.FEATURES,
         "judgeMode": settings.judge_mode,
         "guestHours": settings.guest_hours,
     }
@@ -331,8 +332,8 @@ def usage(user: User = Depends(supervisor), db: Session = Depends(get_db)):
         "guestSessions7d": count(AuditLog.action == "demo_login", AuditLog.at >= week),
         "activeGuests": services.count_guests(db),
         "distinctAccounts": people,
-        "decisions": count(AuditLog.action == "review_set"),
-        "guestDecisions": count(AuditLog.action == "review_set", guest),
+        "decisions": count(AuditLog.action.in_(["review_set", "coding_review_set"])),
+        "guestDecisions": count(AuditLog.action.in_(["review_set", "coding_review_set"]), guest),
         "uploads": count(AuditLog.action == "batch_upload", AuditLog.username != "system"),
         "exports": count(AuditLog.action == "export"),
         "feedback": db.scalar(select(func.count()).select_from(Feedback)) or 0,
@@ -504,6 +505,195 @@ def claim_review(claim_id: int, body: ReviewIn, user: User = Depends(current_use
                    sep=claim.sep, detail=detail)
     db.commit()
     return claim_out(claim, full=True)
+
+
+# ---------- upcoding check ----------
+
+def get_cbatch(batch_id: int, db: Session, user: User) -> CodingBatch:
+    batch = db.get(CodingBatch, batch_id)
+    if batch is None or batch.owner != visible_owner(user):
+        raise HTTPException(404, "Batch tidak ditemukan. Mungkin sudah dihapus.")
+    return batch
+
+
+def _queued(b: CodingBatch, k: Optional[int] = None):
+    """Claims in the queue at capacity `k` (the batch's saved capacity by default)."""
+    return or_(CodingClaim.rule.is_(True), and_(CodingClaim.live.is_(True), CodingClaim.rank <= (b.top_k if k is None else k)))
+
+
+def cbatch_out(b: CodingBatch, db: Session) -> dict:
+    n, reviewed, uplift = db.execute(
+        select(func.count(), func.count(CodingClaim.review_status), func.coalesce(func.sum(CodingClaim.uplift), 0))
+        .where(CodingClaim.batch_id == b.id, _queued(b))
+    ).one()
+    hospitals = b.hospitals or []
+    planted = db.scalar(select(func.count()).select_from(CodingClaim).where(
+        CodingClaim.batch_id == b.id, CodingClaim.label.is_not(None))) if b.labelled else 0
+    return {
+        "planted": planted,
+        "id": b.id, "name": b.name, "filename": b.filename, "uploadedBy": b.uploaded_by, "uploadedAt": iso(b.uploaded_at),
+        "rowsTotal": b.rows_total, "rowsRead": b.rows_read, "bad": b.skipped_bad, "truncated": b.truncated,
+        "groups": b.groups, "compared": b.compared, "hospitalsN": b.hospitals_n,
+        "topK": b.top_k, "maxTopK": coding.max_top_k(b.compared), "baseScore": b.base_score,
+        "labelled": b.labelled, "own": b.owner is not None, "queued": n, "reviewed": reviewed, "uplift": int(uplift or 0),
+        "reviewHospitals": sum(1 for h in hospitals if h.get("verdict") == "tinjau"),
+        "smallBase": b.hospitals_n < coding.MIN_HOSPITALS_FOR_PEERS,
+    }
+
+
+def cclaim_out(c: CodingClaim, full: bool = False) -> dict:
+    out = {
+        "id": c.id, "sep": c.sep, "rs": c.kode_rs, "kelasRs": c.kelas_rs, "admTxt": c.adm_date, "disTxt": c.dis_date,
+        "cbg": c.inacbg, "grp": c.grp, "sev": c.sev, "nSec": c.n_sec, "los": c.los, "icu": c.icu, "vent": c.vent,
+        "died": c.died, "tarif": c.tarif, "uplift": c.uplift, "tested": c.tested, "supported": c.supported,
+        "implied": c.implied, "typLos": c.typ_los, "typDx": c.typ_dx, "baseLos": c.base_los, "careDx": c.care_dx,
+        "pPeer": c.p_peer, "hz": c.hz, "hr": c.hr, "rule": c.rule, "live": c.live, "f": [c.f1, c.f2, c.f3, c.f4],
+        "score": c.score, "rank": c.rank, "phi": c.phi, "label": c.label, "review": review_out(c),
+    }
+    if full:
+        out.update({"cbgDesc": c.inacbg_desc, "diag": c.diag, "proc": c.proc})
+    return out
+
+
+@app.get("/api/coding/batches")
+def list_cbatches(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    owner = visible_owner(user)
+    q = select(CodingBatch).where(CodingBatch.owner.is_(None) if owner is None else CodingBatch.owner == owner)
+    return [cbatch_out(b, db) for b in db.scalars(q.order_by(CodingBatch.id.desc())).all()]
+
+
+@app.post("/api/coding/batches", dependencies=[Depends(csrf)])
+def upload_cbatch(
+    file: UploadFile = File(...), name: str = Form(""),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    owner = visible_owner(user)
+    if owner is not None:
+        n = db.scalar(select(func.count()).select_from(CodingBatch).where(CodingBatch.owner == owner))
+        if n >= settings.guest_max_batches:
+            raise HTTPException(400, "Mode juri dibatasi {} batch. Hapus satu batch dulu.".format(settings.guest_max_batches))
+    raw = file.file.read(settings.max_upload_bytes + 1)
+    if len(raw) > settings.max_upload_bytes:
+        raise HTTPException(413, "Berkas lebih besar dari {} MB, batas untuk prototype ini.".format(
+            settings.max_upload_bytes // (1024 * 1024)))
+    filename = os.path.basename(file.filename or "upload.txt")
+    label = name.strip() or re.sub(r"\.[A-Za-z0-9]{1,5}$", "", filename) or "Batch tanpa nama"
+    try:
+        batch = services.ingest_coding(db, eklaim.decode(raw), name=label, filename=filename, user=user, owner=owner)
+    except eklaim.EklaimError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return cbatch_out(batch, db)
+
+
+@app.get("/api/coding/batches/{batch_id}")
+def cbatch_detail(batch_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = get_cbatch(batch_id, db, user)
+    # enough claims for the capacity slider to reach its maximum without another request
+    claims = db.scalars(
+        select(CodingClaim).where(CodingClaim.batch_id == batch_id, _queued(batch, coding.max_top_k(batch.compared)))
+        .order_by(CodingClaim.rank)
+    ).all()
+    return {"batch": cbatch_out(batch, db), "claims": [cclaim_out(c) for c in claims], "hospitals": batch.hospitals or []}
+
+
+class CodingSettingsIn(BaseModel):
+    topK: int = Field(ge=1, le=200)
+
+
+@app.patch("/api/coding/batches/{batch_id}", dependencies=[Depends(csrf)])
+def cbatch_settings(batch_id: int, body: CodingSettingsIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = get_cbatch(batch_id, db, user)
+    if not can_manage(user):
+        raise HTTPException(403, "Hanya supervisor yang dapat melakukan ini.")
+    top_k = min(body.topK, coding.max_top_k(batch.compared))
+    before = batch.top_k
+    batch.top_k = top_k
+    services.audit(db, user, "coding_settings", batch_id=batch.id, detail={"from": {"topK": before}, "to": {"topK": top_k}, "modul": "koding"})
+    db.commit()
+    return cbatch_out(batch, db)
+
+
+@app.delete("/api/coding/batches/{batch_id}", dependencies=[Depends(csrf)])
+def cbatch_delete(batch_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    batch = get_cbatch(batch_id, db, user)
+    if not can_manage(user):
+        raise HTTPException(403, "Hanya supervisor yang dapat melakukan ini.")
+    services.audit(db, user, "coding_delete", batch_id=batch.id, detail={"name": batch.name, "modul": "koding"})
+    services.delete_coding_batch(db, batch)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/coding/batches/{batch_id}/export.csv")
+def cbatch_export(
+    batch_id: int, k: Optional[int] = Query(None, ge=1, le=200),
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    batch = get_cbatch(batch_id, db, user)
+    k = min(k, coding.max_top_k(batch.compared)) if k is not None else batch.top_k
+    claims = db.scalars(
+        select(CodingClaim).where(CodingClaim.batch_id == batch_id, _queued(batch, k)).order_by(CodingClaim.rank)
+    ).all()
+    labels = [f["label"] for f in coding.FEATURES]
+    buf = io.StringIO()
+    w = csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\r\n")
+    w.writerow(["SEP", "KODE_RS", "KELAS_RS", "INACBG", "CODED_LEVEL", "LEVEL_SHOWN_BY_CARE", "SECONDARY_DX",
+                "SECONDARY_DX_USUAL_FOR_CARE", "LOS", "LOS_USUAL_FOR_CODED_LEVEL", "ICU", "VENTILATOR", "DIED",
+                "TARIF_INACBG", "ESTIMATED_TARIFF_DIFFERENCE", "PEER_SHARE_LEVEL_II_III", "HOSPITAL_Z",
+                "RULE", "ANOMALY_SCORE", "RANK", "MAIN_DRIVER", "PHI_HOSPITAL", "PHI_STAY", "PHI_DIAGNOSES",
+                "PHI_TARIFF", "REVIEW_STATUS", "REVIEW_NOTE", "RS_RESPONSE", "REVIEWED_BY", "REVIEWED_AT"])
+    for c in claims:
+        phi = c.phi or [None] * 4
+        driver = labels[max(range(4), key=lambda i: phi[i])] if c.phi else ""
+        w.writerow([_csv_cell(v) for v in [
+            c.sep, c.kode_rs, c.kelas_rs, c.inacbg, "I" * c.sev, "I" * c.implied if c.implied else "", c.n_sec,
+            "%g" % c.care_dx, c.los, "%g" % c.typ_los, int(c.icu), int(c.vent), int(c.died), c.tarif, c.uplift,
+            "" if c.p_peer is None else "%.3f" % c.p_peer, "%.2f" % c.hz, "flagged" if c.rule else "pass",
+            "%.4f" % c.score, c.rank, driver, *["" if x is None else "%.4f" % x for x in phi],
+            c.review_status or "", c.review_note, c.rs_response or "", c.reviewed_by or "", iso(c.reviewed_at) or "",
+        ]])
+    services.audit(db, user, "coding_export", batch_id=batch.id, detail={"rows": len(claims), "topK": k, "modul": "koding"})
+    db.commit()
+    return Response(
+        "\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="veriklaim-koding-{}.csv"'.format(batch.id)},
+    )
+
+
+def get_cclaim(claim_id: int, db: Session, user: User) -> CodingClaim:
+    claim = db.get(CodingClaim, claim_id)
+    batch = db.get(CodingBatch, claim.batch_id) if claim is not None else None
+    if claim is None or batch is None or batch.owner != visible_owner(user):
+        raise HTTPException(404, "Klaim tidak ditemukan. Batch-nya mungkin sudah dihapus.")
+    return claim
+
+
+@app.get("/api/coding/claims/{claim_id}")
+def cclaim_detail(claim_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    claim = get_cclaim(claim_id, db, user)
+    services.ensure_coding_phi(db, claim)
+    return cclaim_out(claim, full=True)
+
+
+@app.put("/api/coding/claims/{claim_id}/review", dependencies=[Depends(csrf)])
+def cclaim_review(claim_id: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    claim = get_cclaim(claim_id, db, user)
+    before = claim.review_status
+    note, response = body.note.strip(), body.rsResponse.strip()
+    if body.status is None:
+        claim.review_status, claim.review_note, claim.reviewed_by, claim.reviewed_at = None, "", None, None
+        claim.rs_response = ""
+    else:
+        claim.review_status, claim.review_note = body.status, note
+        claim.reviewed_by, claim.reviewed_at = user.username, utcnow()
+        claim.rs_response = response
+    detail = {"from": before, "to": body.status, "note": note[:200], "modul": "koding"}
+    if response:
+        detail["rsResponse"] = response[:200]
+    services.audit(db, user, "coding_review_set" if body.status else "coding_review_reopened", batch_id=claim.batch_id,
+                   sep=claim.sep, detail=detail)
+    db.commit()
+    return cclaim_out(claim, full=True)
 
 
 # ---------- reference prices ----------

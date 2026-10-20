@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="/assets/styles.css">
 <script src="/assets/js/app.js" defer></script>
+<script src="/assets/js/coding.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Langsung ke isi</a>
@@ -25,6 +26,7 @@
   </a>
   <nav id="nav" aria-label="Bagian">
     <a href="#/queue" data-route="queue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg><span>Antrean</span></a>
+    <a href="#/coding" data-route="coding"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="m9 13 2 2 4-4"/></svg><span>Koding</span></a>
     <a href="#/batches" data-route="batches"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-5M9.5 14.5 12 12l2.5 2.5"/></svg><span>Batch</span></a>
     <a href="#/robust" data-route="robust"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/></svg><span>Ketahanan</span></a>
     <div class="sec" id="navSec">
@@ -176,6 +178,101 @@
         </div>
       </section>
     </div>
+  </section>
+
+  <!-- koding: indikasi upcoding -->
+  <section id="view-coding" class="stack" hidden>
+    <div class="mast">
+      <div>
+        <h1 id="kdTitle">Pemeriksaan koding</h1>
+        <p class="databar" id="kdBar"></p>
+      </div>
+      <div class="field pick">
+        <label for="kdSel">Batch</label>
+        <select id="kdSel"></select>
+      </div>
+    </div>
+
+    <div class="empty" id="kdEmpty" hidden>
+      <h2>Belum ada batch koding</h2>
+      <p>Unggah berkas TXT E-Klaim rawat inap dari beberapa rumah sakit untuk memeriksa indikasi upcoding.</p>
+    </div>
+
+    <div id="kdBody" class="stack">
+      <p class="notice"><b>Yang diperiksa, dan yang tidak.</b> Halaman ini menandai klaim yang tingkat keparahannya (I, II, III pada kode INA-CBG) tidak didukung oleh perawatan yang tercatat di klaim itu dan tidak sejalan dengan pola rumah sakit lain. Ini <b>indikator upcoding</b>, bukan penilaian kebutuhan medis. Layak atau tidaknya sebuah perawatan hanya dapat dinilai dari rekam medis oleh verifikator medis; yang dikerjakan di sini adalah memilih klaim mana yang paling layak dibuka rekam medisnya.</p>
+      <p class="notice" id="kdLabelNote" hidden></p>
+      <p class="notice" id="kdSmallNote" hidden></p>
+
+      <ol class="pipe" id="kdPipe" aria-label="Tahap pemeriksaan koding"></ol>
+
+      <section class="ctl one" aria-label="Pengaturan">
+        <div class="field">
+          <label for="kdK"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kdKOut" for="kdK">12</output> klaim tingkat II atau III yang paling tidak didukung ke antrean, di samping klaim yang lolos aturan koding.</label>
+          <input type="range" id="kdK" min="4" max="60" step="1" value="12">
+        </div>
+      </section>
+      <div class="unsaved" id="kdUnsaved" hidden>
+        <span id="kdUnsavedText"></span>
+        <span class="btnrow">
+          <button type="button" class="btn small" id="kdSave" hidden>Simpan untuk semua</button>
+          <button type="button" class="btn ghost small" id="kdReset">Kembalikan</button>
+        </span>
+      </div>
+
+      <section class="kpis" id="kdKpis" aria-label="Ringkasan pemeriksaan koding"></section>
+
+      <div class="work">
+        <section class="panel why" id="kdWhy"></section>
+        <section class="panel queue">
+          <header>
+            <h2>Antrean koding</h2>
+            <div class="toolbar">
+              <div class="seg" id="kdSeg" role="group" aria-label="Baris yang ditampilkan">
+                <button type="button" data-kview="queue" aria-pressed="true">Di antrean</button>
+                <button type="button" data-kview="todo" aria-pressed="false">Belum diperiksa</button>
+              </div>
+              <a class="btn ghost small" id="kdExport" href="#" download>Ekspor CSV</a>
+            </div>
+          </header>
+          <p class="lede" id="kdLede"></p>
+          <div class="claims" id="kdRows" role="list" aria-label="Klaim di antrean koding"></div>
+          <div class="btnrow" id="kdMoreRow" hidden><button type="button" class="btn ghost small" id="kdMore"></button></div>
+        </section>
+      </div>
+
+      <section class="panel" id="kdHospPanel">
+        <header><h2>Pola per rumah sakit</h2></header>
+        <p class="lede">Setiap klaim tingkat II atau III dibandingkan dengan rumah sakit lain pada kelompok kasus yang sama, jadi rumah sakit dengan kasus yang lebih berat tidak dirugikan. Rumah sakit yang jauh lebih sering mengodekan tingkat tinggi <b>dan</b> perawatannya kurang mendukung ditandai "Perlu ditinjau". Rumah sakit rujukan yang tingkat tingginya didukung lama rawat, ICU, ventilator, atau kematian tidak ditandai.</p>
+        <div class="tblwrap">
+          <table class="cardrows">
+            <thead><tr><th>Rumah sakit</th><th>Tingkat II/III dibanding RS lain</th><th>Dukungan perawatan</th><th>Status</th><th class="r">Klaim di antrean</th></tr></thead>
+            <tbody id="kdHosp"></tbody>
+          </table>
+        </div>
+        <div class="btnrow" id="kdHospMoreRow" hidden><button type="button" class="btn ghost small" id="kdHospMore"></button></div>
+      </section>
+    </div>
+
+    <form class="panel pad" id="kdUpload">
+      <h2>Periksa berkas lain</h2>
+      <p class="warn">Gunakan berkas TXT E-Klaim rawat inap dari beberapa rumah sakit, sintetis atau anonim dengan izin resmi. Pembanding adalah rumah sakit lain di berkas yang sama, jadi berkas dari satu rumah sakit saja hanya menghasilkan pemeriksaan per klaim. Server tidak membaca nama pasien, nomor RM, tanggal lahir, atau nomor kartu; berkas mentah tidak disimpan.</p>
+      <div class="formgrid">
+        <div class="field">
+          <label for="kdFile">Ekspor TXT biasa dari E-Klaim</label>
+          <input type="file" id="kdFile" accept=".txt,text/plain" required>
+        </div>
+        <div class="field">
+          <label for="kdName">Nama batch (opsional)</label>
+          <input type="text" id="kdName" maxlength="160" placeholder="Kelompok RS, periode">
+        </div>
+      </div>
+      <div class="btnrow">
+        <button type="submit" class="btn" id="kdUpBtn">Unggah dan periksa</button>
+        <a class="btn ghost" href="/assets/sample/veriklaim-sample-koding.txt" download>Unduh berkas contoh</a>
+        <button type="button" class="btn small danger" id="kdDelete" hidden>Hapus batch yang dipilih</button>
+      </div>
+      <p class="msg" id="kdUpMsg" role="status"></p>
+    </form>
   </section>
 
   <!-- batch -->
@@ -411,9 +508,10 @@
       <div><dt>Panjang antrean</dt><dd>Antrean berisi semua klaim yang ditandai aturan tagihan, ditambah sejumlah klaim teratas dari lapisan anomali. Jumlah itu diatur supervisor sesuai kapasitas verifikator, bukan ambang skor yang dipilih sembarangan.</dd></div>
       <div><dt>Alur keputusan</dt><dd>Verifikator mencatat keputusan dan catatan untuk tiap klaim. Bila dokumen diminta, tanggapan rumah sakit dicatat pada klaim yang sama. Semua perubahan masuk jejak audit. Persentase flag yang dikonfirmasi adalah ukuran presisi yang disebut dalam proposal.</dd></div>
       <div><dt>Arti sebuah flag</dt><dd>Flag mengirim klaim ke verifikator manusia beserta alasannya. Flag bukan temuan fraud. Klaim wajar juga bisa masuk antrean, misalnya dua penggantian sendi pada satu pasien berjarak sepuluh minggu di data contoh.</dd></div>
+      <div><dt>Pemeriksaan koding (halaman Koding)</dt><dd>Lapisan terpisah untuk indikasi upcoding. Kode INA-CBG berakhir pada tingkat keparahan I, II, atau III yang ditentukan grouper dari diagnosis dan prosedur, dan tarifnya naik pada tingkat yang lebih tinggi. Setiap klaim tingkat II atau III dibandingkan dengan klaim lain pada kelompok kasus yang sama: apakah lama rawat, ICU, ventilator, atau kematian mendukung tingkat itu, apakah diagnosis sekundernya lebih banyak daripada yang lazim untuk perawatan seperti itu, dan apakah rumah sakitnya mengodekan tingkat tinggi lebih sering daripada rumah sakit lain pada campuran kasus yang sama. Aturan, Isolation Forest, dan nilai Shapley eksak bekerja seperti pada pemeriksaan top-up. Ini bukan penilaian kebutuhan medis: itu membutuhkan rekam medis dan verifikator medis. Pada data sintetis, pola disisipkan oleh aturan yang sama dengan yang dipakai pemeriksaan, jadi hasilnya menunjukkan kode bekerja sesuai rancangan, bukan kinerja pada klaim nyata. Dengan sedikit rumah sakit di berkas, pembanding tipis dan perbandingan antar-RS tidak diandalkan.</dd></div>
       <div><dt>Pemantauan bias</dt><dd>Tingkat flag ditampilkan per rumah sakit di bawah antrean. Rumah sakit yang membeli di bawah harga katalog, atau pusat rujukan dengan operasi bertahap, bisa tampak tidak biasa tanpa berbuat curang.</dd></div>
       <div><dt>Privasi (UU PDP)</dt><dd>NAMA_PASIEN, MRN, dan BIRTH_DATE tidak pernah dibaca. NOKARTU diganti token satu arah sebelum disimpan, dan berkas mentah tidak disimpan. Gunakan hanya data sintetis, atau data anonim dengan izin resmi.</dd></div>
-      <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas.</dd></div>
+      <div><dt>Batas versi ini</dt><dd>Cek harga per item membutuhkan data obat dan alkes per pasien dari klaim berbasis RME (Fase 2). Volume rumah sakit masih hitungan mentah, belum disesuaikan dengan ukuran rumah sakit. Top-up berulang dihitung dalam satu berkas. Data Sample BPJS Kesehatan memakai nama kolom lain dan, menurut dokumen variabelnya, tidak mencantumkan ID rumah sakit; pembacanya belum dibuat. Pemeriksaan koding menandai indikator, tidak menilai kebutuhan medis, dan norma lama rawat serta diagnosis diambil dari berkas yang diunggah, bukan dari basis nasional.</dd></div>
       <div><dt>Data sintetis</dt><dd>Empat belas dari 80 klaim disisipi pola agar halaman bisa menghitung apa yang ditangkap tiap lapisan. Polanya lebih bersih daripada klaim nyata, jadi angka ini menunjukkan logika bekerja, bukan perkiraan kinerja. Satu klaim fiktif sengaja dibuat tampak wajar pada keempat fitur dan memang tidak tertangkap.</dd></div>
       <div><dt>Kode dan tarif contoh</dt><dd>RR04 dan YY01 beserta tarifnya mengikuti contoh di Petunjuk Teknis. Kode Special Drug dan tarif INA-CBG pada sampel bersifat ilustratif dan perlu dicek ke grouper terbaru sebelum dipakai sungguhan. Daftar lengkap kode Special CMG ada di halaman Harga acuan.</dd></div>
       <div><dt>Ketahanan dan skala</dt><dd>Halaman Ketahanan menampilkan hasil simulasi 2.000 klaim sintetis dengan pengulang yang sah, dan waktu proses pada berkas besar. Pada pola yang mirip pengulang sah, presisi rendah; angka-angka itu menunjukkan batas penyaringan, bukan kinerja pada klaim riil.</dd></div>

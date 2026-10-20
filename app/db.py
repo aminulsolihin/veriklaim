@@ -144,6 +144,80 @@ class Claim(Base):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CodingBatch(Base):
+    """One uploaded E-Klaim file, after the upcoding check. Kept apart from the top-up batches."""
+    __tablename__ = "coding_batches"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160))
+    filename: Mapped[str] = mapped_column(String(200), default="")
+    uploaded_by: Mapped[str] = mapped_column(String(64))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    rows_total: Mapped[int] = mapped_column(Integer)
+    rows_read: Mapped[int] = mapped_column(Integer)
+    skipped_bad: Mapped[int] = mapped_column(Integer, default=0)
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False)
+    groups: Mapped[int] = mapped_column(Integer, default=0)       # case groups with enough claims to compare
+    compared: Mapped[int] = mapped_column(Integer, default=0)     # claims coded II or III inside those groups
+    hospitals_n: Mapped[int] = mapped_column(Integer, default=0)  # distinct hospitals in the file
+    top_k: Mapped[int] = mapped_column(Integer, default=12)
+    base_score: Mapped[float] = mapped_column(Float)
+    labelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    hospitals: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # the hospital table
+    owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+
+class CodingClaim(Base):
+    """One claim in an upcoding check. Holds no patient name, MRN, birth date or card number."""
+    __tablename__ = "coding_claims"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("coding_batches.id", ondelete="CASCADE"), index=True)
+    pos: Mapped[int] = mapped_column(Integer)  # row order in the file; also the row of the model matrix
+    sep: Mapped[str] = mapped_column(String(40), index=True)
+    kode_rs: Mapped[str] = mapped_column(String(20), index=True)
+    kelas_rs: Mapped[str] = mapped_column(String(8), default="")
+    adm_date: Mapped[str] = mapped_column(String(20), default="")
+    dis_date: Mapped[str] = mapped_column(String(20), default="")
+    inacbg: Mapped[str] = mapped_column(String(20), default="")
+    inacbg_desc: Mapped[str] = mapped_column(String(200), default="")
+    grp: Mapped[str] = mapped_column(String(12), default="")
+    sev: Mapped[int] = mapped_column(Integer, default=0)
+    diag: Mapped[str] = mapped_column(String(200), default="")
+    proc: Mapped[str] = mapped_column(String(200), default="")
+    n_sec: Mapped[int] = mapped_column(Integer, default=0)
+    los: Mapped[int] = mapped_column(Integer, default=0)
+    icu: Mapped[bool] = mapped_column(Boolean, default=False)
+    vent: Mapped[bool] = mapped_column(Boolean, default=False)
+    died: Mapped[bool] = mapped_column(Boolean, default=False)
+    tarif: Mapped[int] = mapped_column(BigInteger, default=0)
+    # what the check worked out
+    tested: Mapped[bool] = mapped_column(Boolean, default=False)
+    p_peer: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    supported: Mapped[bool] = mapped_column(Boolean, default=False)
+    implied: Mapped[int] = mapped_column(Integer, default=0)
+    typ_los: Mapped[float] = mapped_column(Float, default=0.0)
+    typ_dx: Mapped[float] = mapped_column(Float, default=0.0)
+    base_los: Mapped[float] = mapped_column(Float, default=0.0)
+    care_dx: Mapped[float] = mapped_column(Float, default=0.0)
+    uplift: Mapped[int] = mapped_column(BigInteger, default=0)
+    hz: Mapped[float] = mapped_column(Float, default=0.0)
+    hr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rule: Mapped[bool] = mapped_column(Boolean, default=False)
+    live: Mapped[bool] = mapped_column(Boolean, default=False)
+    f1: Mapped[float] = mapped_column(Float, default=0.0)
+    f2: Mapped[float] = mapped_column(Float, default=0.0)
+    f3: Mapped[float] = mapped_column(Float, default=0.0)
+    f4: Mapped[float] = mapped_column(Float, default=0.0)
+    score: Mapped[float] = mapped_column(Float)
+    rank: Mapped[int] = mapped_column(Integer, index=True)
+    phi: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # synthetic sample only
+    review_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    review_note: Mapped[str] = mapped_column(Text, default="")
+    rs_response: Mapped[str] = mapped_column(Text, default="")
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Feedback(Base):
     """What people who tried the app said about it: the evidence of use a later MVP claim needs."""
     __tablename__ = "feedback"

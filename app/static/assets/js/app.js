@@ -16,13 +16,14 @@ const when=s=>{if(!s)return '';const d=new Date(s);return isNaN(d)?'':d.toLocale
 const STATUS={both:'Kedua pemeriksaan',rule:'Aturan tagihan',model:'Lapisan anomali',clear:'Bersih'};
 const REVIEW={confirmed:'Temuan dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Dokumen diminta'};
 const KIND={SR:'Special Prosthesis',SD:'Special Drug'};
+const CREV={confirmed:'Upcoding dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Rekam medis diminta'};
 const LABELS={bill:'sisipan: top-up tanpa dukungan tagihan',fiktif:'sisipan: pola klaim fiktif',both:'sisipan: kedua pola','fiktif-quiet':'sisipan: klaim fiktif yang dibuat tampak wajar'};
 const DRIVER=['Tagihan RS','Lama rawat','Top-up berulang','Volume top-up'];
 const FEAT_LABEL=['Tagihan RS vs harga acuan','Lama rawat vs INA-CBG sama','Top-up sama, kartu sama, 90 hari','Volume top-up RS vs sejawat'];
-const ACTIONS={demo_login:'Mulai sesi juri',feedback:'Mengirim umpan balik',login:'Masuk',login_failed:'Gagal masuk',logout:'Keluar',batch_upload:'Mengunggah batch',batch_settings:'Mengubah pengaturan',batch_delete:'Menghapus batch',review_set:'Mencatat keputusan',review_reopened:'Membuka ulang klaim',reference_price_set:'Mengubah harga acuan',reference_price_delete:'Menghapus harga acuan',export:'Ekspor CSV'};
+const ACTIONS={demo_login:'Mulai sesi juri',feedback:'Mengirim umpan balik',login:'Masuk',login_failed:'Gagal masuk',logout:'Keluar',batch_upload:'Mengunggah batch',batch_settings:'Mengubah pengaturan',batch_delete:'Menghapus batch',review_set:'Mencatat keputusan',review_reopened:'Membuka ulang klaim',reference_price_set:'Mengubah harga acuan',reference_price_delete:'Menghapus harga acuan',export:'Ekspor CSV',coding_upload:'Mengunggah batch koding',coding_settings:'Mengubah pengaturan koding',coding_delete:'Menghapus batch koding',coding_review_set:'Mencatat keputusan koding',coding_review_reopened:'Membuka ulang klaim koding',coding_export:'Ekspor CSV koding'};
 const ROLE={verifikator:'verifikator',supervisor:'supervisor',juri:'juri · tamu'};
 const PERAN={verifikator:'Verifikator / anti-fraud BPJS','koder-rs':'Koder / casemix RS',klinisi:'Dokter / nakes','manajemen-rs':'Manajemen RS',juri:'Juri / penilai',lainnya:'Lainnya'};
-const ROUTES=['queue','batches','refs','robust','audit','feedback','about'];
+const ROUTES=['queue','coding','batches','refs','robust','audit','feedback','about'];
 
 const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null};
 const UP_WARN=$('upWarn').textContent;
@@ -86,7 +87,7 @@ $('judgeBtn').addEventListener('click',async()=>{
 $('signOut').addEventListener('click',async()=>{
   if(S.user&&S.user.guest&&!window.confirm('Keluar dari sesi juri? Data sesi ini tidak bisa dibuka lagi; Anda bisa memulai sesi baru kapan saja.')) return;
   try{await api('POST','/api/logout',{},{quiet401:true})}catch(_){}
-  S.batch=null; S.claims=[]; S.sel=null; history.replaceState(null,'','#/queue'); showLogin('');
+  S.batch=null; S.claims=[]; S.sel=null; if(window.VKCoding) window.VKCoding.reset(); history.replaceState(null,'','#/queue'); showLogin('');
 });
 async function enter(){
   $('top').hidden=false; $('foot').hidden=false;
@@ -113,7 +114,7 @@ function route(){
   S.route=r; showOnly('view-'+r);
   document.querySelectorAll('#nav a').forEach(a=>{if(a.dataset.route===r)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
   $('moreBtn').toggleAttribute('data-current',!!$('navSec').querySelector('a[aria-current]'));
-  Promise.resolve().then(()=>({queue:openQueue,batches:openBatches,refs:openRefs,robust:openRobust,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
+  Promise.resolve().then(()=>({queue:openQueue,coding:()=>window.VKCoding&&window.VKCoding.open(),batches:openBatches,refs:openRefs,robust:openRobust,audit:openAudit,feedback:openFeedback,about:()=>{}})[r]()).catch(fail);
 }
 window.addEventListener('hashchange',route);
 
@@ -123,8 +124,8 @@ function closeMore(){$('nav').classList.remove('open'); $('moreBtn').setAttribut
 $('moreBtn').addEventListener('click',()=>{const o=!$('nav').classList.contains('open'); $('nav').classList.toggle('open',o); $('moreBtn').setAttribute('aria-expanded',String(o))});
 document.addEventListener('click',e=>{if(!e.target.closest('#nav')) closeMore()});
 window.addEventListener('hashchange',()=>{closeMore(); closeSheet()});
-function openSheet(){if(!MOBILE.matches) return; $('why').classList.add('sheet'); $('why').scrollTop=0; document.body.classList.add('sheet-open')}
-function closeSheet(){$('why').classList.remove('sheet'); document.body.classList.remove('sheet-open')}
+function openSheet(el){if(!MOBILE.matches) return; el=el||$('why'); el.classList.add('sheet'); el.scrollTop=0; document.body.classList.add('sheet-open')}
+function closeSheet(){document.querySelectorAll('.why.sheet').forEach(e=>e.classList.remove('sheet')); document.body.classList.remove('sheet-open')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMore(); closeSheet()}});
 
 /* ---------- batch ---------- */
@@ -632,6 +633,8 @@ function detailText(a){
   if(!d) return '';
   const kv=o=>Object.keys(o).map(k=>`${k}: ${o[k]===null?'-':typeof o[k]==='object'?JSON.stringify(o[k]):o[k]}`).join(', ');
   if(a.action==='review_set'||a.action==='review_reopened') return `${d.from?REVIEW[d.from]:'belum diperiksa'} → ${d.to?REVIEW[d.to]:'belum diperiksa'}${d.note?' · “'+d.note+'”':''}${d.rsResponse?' · tanggapan RS: “'+d.rsResponse+'”':''}`;
+  if(a.action==='coding_review_set'||a.action==='coding_review_reopened') return `${d.from?CREV[d.from]:'belum diperiksa'} → ${d.to?CREV[d.to]:'belum diperiksa'}${d.note?' · “'+d.note+'”':''}${d.rsResponse?' · tanggapan RS: “'+d.rsResponse+'”':''}`;
+  if(a.action==='coding_settings') return `${d.from.topK} teratas → ${d.to.topK} teratas`;
   if(a.action==='batch_settings') return `${d.from.thresholdPct}%, ${d.from.topK} teratas → ${d.to.thresholdPct}%, ${d.to.topK} teratas`;
   return kv(d);
 }
@@ -726,6 +729,9 @@ $('fbForm').addEventListener('submit',async e=>{
   }catch(err){if(!err.auth) $('fbMsg').textContent=err.message}
   finally{btn.disabled=false}
 });
+
+/* ---------- untuk halaman Koding (coding.js) ---------- */
+window.VK={S,$,api,esc,dots,dec,rp,rpShort,one,times,sc,when,toast,fail,icon,openSheet,closeSheet,tourTick:tick};
 
 /* ---------- mulai ---------- */
 async function boot(){
