@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: APP_ENV
@@ -21,6 +21,8 @@ services:
         sync: false
       - key: LOGIN_HINT
         sync: false
+      - key: PROXY_HOPS
+        value: "2"
       - key: JUDGE_MODE
         value: "1"
       - key: GUEST_HOURS

@@ -65,7 +65,7 @@ def split_codes(text: str) -> list[str]:
 
 
 def parse_coding(text: str) -> dict:
-    """Read every claim of an E-Klaim TXT export. Returns {"rows", "total", "bad"}.
+    """Read every claim of an E-Klaim TXT export. Returns {"rows", "total", "bad", "dup"}; `bad` includes the duplicate-SEP rows.
 
     Only what the check needs is read. Patient name, MRN, birth date and card number are not."""
     lines = [ln for ln in (text or "").replace("\r", "").split("\n") if ln.strip()]
@@ -87,7 +87,8 @@ def parse_coding(text: str) -> dict:
         return cells[i].strip() if i is not None and i < len(cells) else ""
 
     rows: list[dict] = []
-    bad = 0
+    bad = dup = 0
+    seen: set[str] = set()
     for line in lines[1:]:
         c = line.split("\t")
         sep, cbg = g(c, "SEP"), g(c, "INACBG").upper()
@@ -95,6 +96,10 @@ def parse_coding(text: str) -> dict:
         if not sep or not m:
             bad += 1
             continue
+        if sep in seen:  # a repeated SEP is one claim exported twice; keep the first
+            dup += 1
+            continue
+        seen.add(sep)
         codes = split_codes(g(c, "DIAGLIST"))
         status = g(c, "DISCHARGE_STATUS")
         rows.append({
@@ -116,7 +121,7 @@ def parse_coding(text: str) -> dict:
             "died": status == "4",
             "tarif": min(10 ** 12, int(to_number(g(c, "TARIF_INACBG")))),
         })
-    return {"rows": rows, "total": len(lines) - 1, "bad": bad}
+    return {"rows": rows, "total": len(lines) - 1, "bad": bad + dup, "dup": dup}
 
 
 def _median(values: list[float]) -> float:

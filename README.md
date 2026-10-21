@@ -45,15 +45,33 @@ claims that carry such a top-up, and ranks them for review.
 | Judge mode | One-click guest sessions, each with a private copy of the synthetic sample and a guided checklist. |
 | Governance | Role-based access, an audit log of every state change, CSV export of the queue. |
 
-The interface uses a cream page with flat colour cards. Colour carries meaning: butter marks the bill
-rule, mint the anomaly layer, black a claim flagged by both. On phones the navigation becomes a tab bar
-and a selected claim opens as a full-screen sheet. Fonts (Plus Jakarta Sans) load from Google Fonts.
+The interface follows one pattern on both checks (Top-up and Koding): a one-line data notice, a four-number
+summary strip, then tabs. The first tab holds the claim queue beside the selected claim's reasons and decision
+form, with the calculation folded away; the other tabs hold the overview (pipeline, chart, notes) and the
+monitoring tables. Queue settings sit in a collapsed row. Both kinds of file are uploaded from one Berkas
+page, and the less-used pages are under a "Lainnya" menu. Colour carries meaning in the chart and in the
+selected claim's header: butter marks the bill rule, mint the anomaly layer, black a claim flagged by both.
+On phones the navigation becomes a tab bar and a selected claim opens as a full-screen sheet. Fonts
+(Plus Jakarta Sans) load from Google Fonts.
+
+Working through a queue: search by SEP, hospital or item; the view buttons show their counts; "Simpan dan
+lanjut" saves the decision and opens the next unreviewed claim, "Simpan saja" stays on the claim.
+
+Accessibility (WCAG 2.1 AA target). Every claim is a real button, so the queue works by keyboard alone: Tab
+into the list, Up/Down/Home/End move between claims, Enter opens one and moves focus to its detail, Esc closes
+the phone sheet and returns focus to the claim. The sheet is a modal dialog with a focus trap. Text and
+control borders meet 4.5:1 and 3:1, targets are at least 44px on phones and touch screens, focus rings are
+always visible, the layout holds at 320px width, and reduced-motion and forced-colors are respected. Checked
+with axe-core (0 violations across 34 views), a keyboard walk-through and a contrast script; it has not been
+tested with a real screen reader (VoiceOver, NVDA).
 
 ## How screening works
 
 1. **Parse.** The reader takes 21 of the 59 `pull_claim` columns (Petunjuk Teknis E-Klaim 5.1.1),
    matched by header name. `NAMA_PASIEN`, `MRN` and `BIRTH_DATE` are never read. `NOKARTU` is replaced
-   by a keyed one-way token (HMAC-SHA256) before the row leaves the parser.
+   by a keyed one-way token (HMAC-SHA256) before the row leaves the parser. Amounts are read in either
+   number format (`25,000,000.50` or `25.000.000,50`), absurdly large values are clamped, and a SEP that
+   appears twice is kept once (the extra rows are counted with the unreadable ones).
 2. **Bill rule.** `cover = TARIF_RS / reference price` of the top-up item. A claim is flagged when
    `cover` is below the threshold (default 100%): the hospital's whole bill for the episode is smaller
    than the price of the item it claims.
@@ -162,6 +180,7 @@ All settings are environment variables, read once at start-up.
 | `JUDGE_MODE` | `1` | Enable the guest button and guest sessions. `0` disables them. |
 | `GUEST_HOURS` | `24` | Lifetime of a guest session and its data. |
 | `MAX_GUESTS` | `300` | Guest sessions alive at once. |
+| `PROXY_HOPS` | `2` in production, else `0` | Reverse proxies in front of the app, counted from the right of `X-Forwarded-For`; used for the sign-in and guest rate limits. Render adds its own proxy after the client's address, so the client is second from the right. Entries to the left are written by the client and are ignored. `0` uses the socket address. |
 | `GUEST_LOGINS_PER_IP_HOUR` | `60` | New guest sessions per client address per hour. Kept generous because several reviewers can share one office address. |
 | `GUEST_MAX_BATCHES` | `5` | Batches one guest may hold. |
 
@@ -194,9 +213,11 @@ pytest                                                                 # SQLite 
 TEST_DATABASE_URL=postgresql://user@localhost/veriklaim_test pytest    # the same suite on Postgres
 ```
 
-The suite has 71 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
+The suite has 107 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
 checks, the review workflow, judge-mode isolation and expiry, the robustness endpoint, and the upcoding
-check (reader, indicators, hospital pattern, API, isolation). It passes on SQLite and on Postgres.
+check (reader, indicators, hospital pattern, API, isolation), static accessibility guardrails (markup,
+colour contrast, keyboard path), and input hardening (number formats, absurd values, duplicate SEPs, rate-limit
+key, CSV cells). It passes on SQLite and on Postgres.
 
 ## Deployment
 
@@ -225,7 +246,7 @@ Use Neon rather than Render's own free Postgres, which expires 30 days after cre
 | `VERIFIKATOR_PASSWORD`, `SUPERVISOR_PASSWORD` | Prompted. Passwords for the two team accounts. |
 | `LOGIN_HINT` | Prompted, optional. A line shown on the sign-in page. |
 | `SECRET_KEY` | Generated by Render. |
-| `APP_ENV=production`, `JUDGE_MODE=1`, `GUEST_HOURS=24` | Preset in `render.yaml`. |
+| `APP_ENV=production`, `JUDGE_MODE=1`, `GUEST_HOURS=24`, `PROXY_HOPS=2` | Preset in `render.yaml`. |
 
 `render.yaml` also sets the build and start commands (`uvicorn` with proxy headers enabled) and uses
 `/healthz` as the health check.
@@ -258,7 +279,9 @@ it fits only when this is the only free web service in the Render workspace.
 - `NAMA_PASIEN`, `MRN` and `BIRTH_DATE` are never read. `NOKARTU` is stored only as a keyed one-way
   token, which still allows repeat top-ups to be counted. The raw file is not retained.
 - Passwords are stored as scrypt hashes. Sessions are signed, `HttpOnly`, `SameSite=Lax` cookies
-  (`Secure` in production). Failed sign-ins are rate limited, as are new guest sessions per address.
+  (`Secure` in production). Failed sign-ins are rate limited, as are new guest sessions per address; the
+  address comes from `X-Forwarded-For` as set by the platform proxy (`PROXY_HOPS`), never from entries the
+  client wrote.
 - The service sends `X-Robots-Tag: noindex` and serves `robots.txt`.
 - Guests have no password or personal details. The feedback form asks for a role, an optional
   institution and a comment, and tells users not to enter patient data.
@@ -341,6 +364,10 @@ render.yaml        Render Blueprint
 - **Special CMG codes.** `RR04` follows the worked example in the Petunjuk Teknis. The Special Drug
   code (`DD01`) and the INA-CBG tariffs in the sample are illustrative.
 - **Repeat top-ups** are counted within one file, not across batches.
+- **Both top-ups on one claim.** A claim with a Special Prosthesis and a Special Drug top-up is screened on
+  the prosthesis only.
+- **Large files.** Above `MAX_CLAIMS` only the first rows of the file are screened (the page says so), so a
+  file sorted by hospital can give a skewed peer comparison; split such files or raise the limit.
 - **Hospital volume** is a raw count, not scaled to hospital size.
 - **Item-level price checks** need per-patient drug and device data from RME-based claims, which E-Klaim
   exports do not carry.

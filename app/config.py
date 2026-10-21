@@ -71,6 +71,12 @@ class Settings:
         self.guest_logins_per_ip_hour = _int("GUEST_LOGINS_PER_IP_HOUR", 60)
         self.guest_max_batches = _int("GUEST_MAX_BATCHES", 5)
 
+        # How many reverse proxies sit in front of the app, counted from the right of X-Forwarded-For.
+        # Render adds its own proxy address after the client's, so the client is second from the right
+        # (2). Entries further left are written by the client and are never trusted. 0 uses the socket
+        # address, which is right for local runs.
+        self.proxy_hops = _int("PROXY_HOPS", 2 if self.production else 0)
+
         self.static_dir = BASE_DIR / "static"
         self.data_dir = BASE_DIR / "data"
 

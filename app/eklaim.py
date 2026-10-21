@@ -9,6 +9,7 @@ token before the row leaves this module.
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import date
 from typing import Callable, Optional
@@ -19,7 +20,8 @@ KIND_NAMES = {"SR": "Special Prosthesis", "SD": "Special Drug"}
 _DMY = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})")
 _YMD = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})")
 _CODE = re.compile(r"^([A-Z]{2})-?(\d{2})")
-_NOT_NUM = re.compile(r"[^0-9.\-]")
+_NOT_NUM = re.compile(r"[^0-9.,\-]")
+MAX_NUMBER = 10 ** 13   # larger values are clamped to this, so they can neither overflow a column nor raise
 
 
 class EklaimError(ValueError):
@@ -57,11 +59,32 @@ def norm_code(value: str) -> Optional[str]:
 
 
 def to_number(value: str) -> float:
+    """Read a number written either way: 25000000.50, 25,000,000.50 or 25.000.000,50.
+
+    The last '.' or ',' is the decimal mark when both appear. A lone separator is a decimal mark
+    when 1-2 digits follow it and a thousands mark when exactly 3 do ('25.000' is 25000). Unreadable
+    text gives 0.0; infinite or larger-than-MAX_NUMBER values are clamped to MAX_NUMBER."""
     s = _NOT_NUM.sub("", value or "")
+    if "-" in s[1:]:
+        return 0.0
+    neg = s.startswith("-")
+    s = s.replace("-", "")
+    if "." in s and "," in s:
+        dec = "." if s.rfind(".") > s.rfind(",") else ","
+        s = s.replace("," if dec == "." else ".", "").replace(dec, ".")
+    elif "." in s or "," in s:
+        sep = "." if "." in s else ","
+        tail = s.rsplit(sep, 1)[1]
+        if s.count(sep) > 1 or len(tail) == 3:
+            s = s.replace(sep, "")
+        else:
+            s = s.replace(sep, ".")
     try:
-        return float(s)
+        v = float(s)
     except ValueError:
         return 0.0
+    v = MAX_NUMBER if not math.isfinite(v) else min(v, MAX_NUMBER)
+    return -v if neg else v
 
 
 def _clip(value: str, n: int) -> str:
@@ -69,7 +92,8 @@ def _clip(value: str, n: int) -> str:
 
 
 def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str]) -> dict:
-    """Return {"rows": [...], "total", "no_topup", "no_ref", "bad"}.
+    """Return {"rows": [...], "total", "no_topup", "no_ref", "bad", "dup"}. `bad` includes the `dup` rows
+    (a SEP seen earlier in the file; the first one is kept).
 
     `refs` maps a Special CMG code to {"kind", "description", "price"}. Only claims
     whose Special Prosthesis or Special Drug code has a reference price are kept.
@@ -97,7 +121,8 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
         return cells[i].strip() if i is not None and i < len(cells) else ""
 
     rows: list[dict] = []
-    no_topup = no_ref = bad = 0
+    no_topup = no_ref = bad = dup = 0
+    seen: set[str] = set()
     for line in lines[1:]:
         c = line.split("\t")
         sr = norm_code(g(c, "IN_SR")) or norm_code(g(c, "SR"))
@@ -117,9 +142,13 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
         adm_day = parse_day(g(c, "ADMISSION_DATE"))
         tarif_rs = to_number(g(c, "TARIF_RS"))
         sep = g(c, "SEP")
-        if not sep or adm_day is None or tarif_rs <= 0:
+        if not sep or adm_day is None or tarif_rs <= 0 or tarif_rs >= MAX_NUMBER:
             bad += 1
             continue
+        if sep in seen:  # the same SEP twice (a re-export) would count as a repeat and inflate volume
+            dup += 1
+            continue
+        seen.add(sep)
         rows.append({
             "sep": _clip(sep, 40),
             "kode_rs": _clip(g(c, "KODE_RS"), 20),
@@ -140,8 +169,8 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
             "tarif_inacbg": int(to_number(g(c, "TARIF_INACBG"))),
             "total_tarif": int(to_number(g(c, "TOTAL_TARIF"))),
             "tarif_rs": int(tarif_rs),
-            "los": max(0, int(to_number(g(c, "LOS")))),
+            "los": min(100_000, max(0, int(to_number(g(c, "LOS"))))),
             "card_token": tokenise(g(c, "NOKARTU")),
             "ref_price": int(ref["price"]),
         })
-    return {"rows": rows, "total": len(lines) - 1, "no_topup": no_topup, "no_ref": no_ref, "bad": bad}
+    return {"rows": rows, "total": len(lines) - 1, "no_topup": no_topup, "no_ref": no_ref, "bad": bad + dup, "dup": dup}

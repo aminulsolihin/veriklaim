@@ -1,7 +1,7 @@
 /* Halaman Koding: indikator upcoding. Penskoran berjalan di server; skrip ini hanya menampilkan. */
 (function(){
 'use strict';
-const {S,$,api,esc,dots,dec,rp,rpShort,one,times,sc,when,toast,fail,icon,openSheet,closeSheet}=window.VK;
+const {S,$,api,esc,dots,dec,rp,rpShort,one,times,sc,when,toast,fail,icon,openSheet,closeSheet,stripHtml,cardHtml,detailHtml,syncResp,bindTabs,listKeys,nextAfter,setPanel,focusDetail}=window.VK;
 
 const CREV={confirmed:'Upcoding dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Rekam medis diminta'};
 const STATUS={both:'Kedua pemeriksaan',rule:'Aturan koding',model:'Lapisan anomali',clear:'Bersih'};
@@ -12,8 +12,8 @@ const HLAB={strong:'upcoding kuat disisipkan',mild:'upcoding ringan disisipkan',
 const roman=n=>['','I','II','III'][n]||String(n);
 const pct=v=>Math.round(v*100)+'%';
 
-const PAGE=20, HOSP_PAGE=8;
-const K={batches:[],batch:null,claims:[],byId:{},hospitals:[],hmap:{},k:12,view:'queue',rs:null,sel:null,draft:null,lo:0,hi:1,limit:PAGE,allHosp:false};
+const PAGE=20, HOSP_PAGE=8, MQ=window.matchMedia('(max-width:980px)');
+const K={batches:[],batch:null,claims:[],byId:{},hospitals:[],hmap:{},k:12,view:'queue',rs:null,sel:null,draft:null,lo:0,hi:1,limit:PAGE,allHosp:false,want:null,tab:'queue',q:'',cnt:null};
 
 function reset(){
   K.batches=[]; K.batch=null; K.claims=[]; K.byId={}; K.hospitals=[]; K.hmap={}; K.sel=null; K.draft=null; K.rs=null;
@@ -28,18 +28,19 @@ async function loadList(){
 async function open(){
   await loadList();
   const none=!K.batches.length;
-  $('kdEmpty').hidden=!none; $('kdBody').hidden=none; $('kdSel').closest('.field').hidden=none;
-  const manage=S.user.role==='supervisor'||!!S.user.guest;
-  $('kdSave').hidden=!manage; $('kdDelete').hidden=none||!manage;
+  $('kdEmpty').hidden=!none; $('kdBody').hidden=none; $('kdSel').closest('.field').hidden=K.batches.length<2;
+  $('kdSave').hidden=!(S.user.role==='supervisor'||!!S.user.guest);
   if(none){$('kdTitle').textContent='Pemeriksaan koding'; $('kdBar').textContent=''; return}
-  if(!K.batch||!K.batches.some(b=>b.id===K.batch.id)) await loadBatch(K.batches[0].id);
+  const want=K.want; K.want=null;
+  if(want&&K.batches.some(b=>b.id===want)) await loadBatch(want);
+  else if(!K.batch||!K.batches.some(b=>b.id===K.batch.id)) await loadBatch(K.batches[0].id);
   else update();
 }
 async function loadBatch(id){
   const d=await api('GET','/api/coding/batches/'+id);
   K.batch=d.batch; K.claims=d.claims; K.hospitals=d.hospitals; K.byId={}; K.hmap={}; K.rs=null;
   K.claims.forEach(c=>{K.byId[c.id]=c}); K.hospitals.forEach(h=>{K.hmap[h.rs]=h});
-  K.k=K.batch.topK; K.draft=null; K.view='queue'; K.limit=PAGE; K.allHosp=false;
+  K.k=K.batch.topK; K.draft=null; K.view='queue'; K.limit=PAGE; K.allHosp=false; K.q=''; K.rs=null; $('kdSearch').value='';
   $('kdSel').value=id; $('kdK').max=K.batch.maxTopK; $('kdK').value=K.k;
   const sc2=K.claims.filter(c=>c.live).map(c=>c.score);
   K.hi=Math.max(...sc2,0.5); K.lo=Math.min(...sc2,K.hi-0.05);
@@ -68,10 +69,12 @@ function counts(){
 
 /* ---------- halaman ---------- */
 function renderHead(){
-  const b=K.batch, parts=[`<span>Diunggah oleh <b>${esc(b.uploadedBy)}</b>, ${esc(when(b.uploadedAt))}</span>`,`<span>${dots(b.rowsTotal)} baris dibaca</span>`,`<span>${b.hospitalsN} rumah sakit</span>`];
-  if(b.bad) parts.push(`<span>${dots(b.bad)} tidak terbaca, dilewati</span>`);
+  const b=K.batch;
+  $('kdTitle').textContent=b.name;
+  const parts=[`<span><b>${dots(b.rowsRead)}</b> klaim dari ${b.hospitalsN} rumah sakit</span>`,`<span>diunggah oleh ${esc(b.uploadedBy)}, ${esc(when(b.uploadedAt))}</span>`];
+  if(b.bad) parts.push(`<span>${dots(b.bad)} baris tidak terbaca atau ganda, dilewati</span>`);
   if(b.truncated) parts.push(`<span>hanya ${dots(b.rowsRead)} klaim pertama yang diperiksa</span>`);
-  $('kdTitle').textContent=b.name; $('kdBar').innerHTML=parts.join('');
+  $('kdBar').innerHTML=parts.join('');
 }
 function renderPipe(n){
   const b=K.batch;
@@ -84,12 +87,14 @@ function renderPipe(n){
 }
 function renderKpis(n){
   const b=K.batch, share=b.compared?Math.round(n.flag/b.compared*100):0;
-  $('kdKpis').innerHTML=[
-    [`${n.rule}`,'klaim lolos aturan koding','diagnosis sekunder berlebih, tanpa ICU atau ventilator, rawat singkat'],
-    [`+${n.modelOnly}`,'klaim hanya ditemukan lapisan anomali','kombinasi sinyal yang tidak biasa, belum tentu lolos aturan'],
-    [`${n.flag}<small> dari ${dots(b.compared)}</small>`,'klaim II/III di antrean',`beban kerja ${share}% dari klaim yang dibandingkan`],
-    [`${rpShort(n.uplift)}`,'perkiraan selisih tarif klaim di antrean','bila diturunkan ke tingkat terendah. Perkiraan, bukan kerugian terbukti']
-  ].map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}<br>${k[2]}</div></div>`).join('');
+  $('kdKpis').innerHTML=stripHtml([
+    [`${n.flag}<small> dari ${dots(b.compared)}</small>`,'klaim tingkat II/III perlu diperiksa'],
+    [`${n.rule}`,'ditandai aturan koding'],
+    [`+${n.modelOnly}`,'hanya ditandai lapisan anomali'],
+    [`${n.reviewed}<small> dari ${n.flag}</small>`,'sudah diperiksa',n.flag?n.reviewed/n.flag:0]
+  ]);
+  $('kdValNote').innerHTML=`<b>Perkiraan selisih tarif.</b> Bila klaim di antrean diturunkan ke tingkat terendah, tarif INA-CBG-nya turun sekitar ${rpShort(n.uplift)}. Ini perkiraan, bukan kerugian terbukti. Antrean memuat ${share}% dari ${dots(b.compared)} klaim II/III yang dibandingkan. Aturan koding: diagnosis sekunder berlebih, tanpa ICU atau ventilator, rawat singkat.`;
+  $('kdBanner').innerHTML=`Ini indikator upcoding, bukan penilaian kebutuhan medis.${b.labelled?' Data sintetis: hanya menunjukkan cara kerja, bukan kinerja pada klaim nyata.':''} <button type="button" class="go" data-goto-tab="about" aria-label="Rincian cara kerja dan batasan, di tab Gambaran">Rincian</button>`;
 
   const note=$('kdLabelNote'); note.hidden=!b.labelled;
   if(b.labelled){
@@ -100,11 +105,14 @@ function renderKpis(n){
   }
   const small=$('kdSmallNote'); small.hidden=!b.smallBase;
   if(b.smallBase) small.innerHTML=`<b>Pembanding tipis.</b> Berkas ini hanya memuat ${b.hospitalsN} rumah sakit. Perbandingan dengan rumah sakit lain tidak diandalkan; pemeriksaan per klaim tetap berjalan. Unggah berkas dari lebih banyak rumah sakit untuk pola per rumah sakit yang berarti.`;
+  const th=$('kdTabHosp'); th.hidden=!!b.smallBase||!K.hospitals.length;
+  if(th.hidden&&K.tab==='hosp') tabs.set('queue');
 }
 function renderUnsaved(){
   const b=K.batch, dirty=K.k!==b.topK;
   $('kdUnsaved').hidden=!dirty;
   if(dirty) $('kdUnsavedText').textContent=`Anda sedang mencoba kapasitas lain. Kapasitas tersimpan untuk batch ini: ${b.topK} klaim.`+(S.user.role==='supervisor'||S.user.guest?'':' Hanya supervisor yang dapat menyimpan perubahan.');
+  $('kdSum').textContent=`${K.k} klaim anomali`+(dirty?' · belum disimpan':'');
 }
 function renderHosp(n){
   const list=K.allHosp?K.hospitals:K.hospitals.slice(0,HOSP_PAGE);
@@ -119,42 +127,51 @@ function renderHosp(n){
       <td><span class="num">${h.high}</span> dikodekan II/III, harapan <span class="num">${dec(h.expected,1)}</span><span class="sm">${ratio}</span></td>
       <td>${sup}</td>
       <td><span class="tag${vc?' '+vc:''}">${vt}</span></td>
-      <td class="r act">${q?`<span class="num">${q}</span> di antrean <button type="button" class="btn small ghost" data-rs="${esc(h.rs)}">Lihat</button>`:'<span class="num">0</span> di antrean'}</td></tr>`;
+      <td class="r act">${q?`<span class="num">${q}</span> di antrean <button type="button" class="btn small ghost" data-rs="${esc(h.rs)}" aria-label="Lihat ${q} klaim RS ${esc(h.rs)} di antrean">Lihat</button>`:'<span class="num">0</span> di antrean'}</td></tr>`;
   }).join('');
   $('kdHosp').innerHTML=rows||'<tr><td colspan="5">Tidak ada rumah sakit dengan pembanding yang cukup di berkas ini.</td></tr>';
 }
 $('kdHospMore').addEventListener('click',()=>{K.allHosp=!K.allHosp; renderHosp(counts())});
 $('kdHosp').addEventListener('click',e=>{
   const b=e.target.closest('[data-rs]'); if(!b) return;
-  K.rs=b.dataset.rs; K.view='queue'; K.limit=PAGE; renderRows(); $('kdRows').closest('.panel').scrollIntoView({behavior:'smooth',block:'start'});
+  K.rs=b.dataset.rs; K.view='queue'; K.limit=PAGE; tabs.set('queue'); renderRows(); window.scrollTo({top:0,behavior:'smooth'});
 });
 
-function renderRows(){
+function queueList(){
+  const q=K.q.trim().toLowerCase();
   let list=K.claims.filter(c=>c.st!=='clear'&&(K.view==='queue'||!c.review)&&(!K.rs||c.rs===K.rs));
-  list.sort((a,b)=>a.rank-b.rank);
+  if(q) list=list.filter(c=>`${c.sep} ${c.rs} ${c.grp} ${c.cbg} ${roman(c.sev)}`.toLowerCase().includes(q));
+  return list.sort((a,b)=>a.rank-b.rank);
+}
+function renderSeg(){
+  const n=K.cnt; if(!n) return;
+  const t={queue:['Di antrean',n.flag],todo:['Belum diperiksa',n.flag-n.reviewed]};
+  document.querySelectorAll('#kdSeg button[data-kview]').forEach(b=>{const x=t[b.dataset.kview]; b.innerHTML=`${x[0]}<span class="cnt">${dots(x[1])}</span>`; b.setAttribute('aria-pressed',String(b.dataset.kview===K.view))});
+}
+function renderRows(){
+  let list=queueList();
   const total=list.length; if(total>K.limit) list=list.slice(0,K.limit);
-  $('kdMoreRow').hidden=total<=K.limit; $('kdMore').textContent=`Tampilkan ${Math.min(PAGE,total-K.limit)} lagi (sisa ${total-K.limit})`;
-  $('kdLede').innerHTML='Diurutkan menurut skor anomali. Pilih klaim untuk melihat alasannya dan mencatat keputusan.'+(K.rs?` Menampilkan hanya RS ${esc(K.rs)}. <button type="button" class="go" id="kdClearRs">Tampilkan semua</button>`:'')+(total>K.limit?` Menampilkan ${K.limit} pertama dari ${dots(total)}.`:'');
-  document.querySelectorAll('#kdSeg button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.kview===K.view));
+  renderSeg();
+  const q=K.q.trim();
+  $('kdMoreRow').hidden=total<=K.limit; $('kdMore').textContent=`Tampilkan ${Math.min(PAGE,total-K.limit)} lagi (sisa ${dots(total-K.limit)})`;
+  $('kdLede').innerHTML=total?`${dots(total)} klaim${q?` cocok dengan “${esc(q)}”`:''}${K.rs?`, hanya RS ${esc(K.rs)}`:''}, diurutkan menurut skor anomali. Pilih satu untuk melihat alasannya.`+(K.rs?` <button type="button" class="go" id="kdClearRs">Tampilkan semua rumah sakit</button>`:''):(K.rs?`<button type="button" class="go" id="kdClearRs">Tampilkan semua rumah sakit</button>`:'');
   $('kdRows').innerHTML=list.map(c=>{
     const d=c.mf&&c.phi?topDriver(c):-1;
-    const why=d>=0?`${DRIVER[d]}: ${esc(featText(c,d))}`:c.rf?`Aturan koding: ${c.nSec} diagnosis sekunder, lazim ${one(c.careDx)}`:'';
-    const w=Math.max(4,Math.min(100,(c.score-K.lo)/Math.max(0.01,K.hi-K.lo)*100));
-    const rv=c.review?`<span class="rv done">${CREV[c.review.status]}</span>`:'<span class="rv">Belum diperiksa</span>';
-    return `<article class="claim st-${c.st}" role="listitem" data-id="${c.id}"${K.sel===c?' aria-current="true"':''}>
-      <div class="chips"><span class="chip">Skor <b class="num">${sc(c.score)}</b></span><span class="chip">Tingkat <b>${roman(c.sev)}</b></span><span class="chip">RS ${esc(c.rs)}</span></div>
-      <h3 class="ctitle">Kelompok ${esc(c.grp)}, dikodekan tingkat ${roman(c.sev)}</h3>
-      <p class="cdesc"><button type="button" class="idb">${esc(c.sep)}</button><span><span class="num">${esc(c.cbg)}</span> · rawat ${c.los} hari · pulang ${esc(c.disTxt||c.admTxt)}</span></p>
-      <div class="cfoot"><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span>${rv}</div>
-      ${why?`<p class="cwhy">${why}</p>`:''}
-      <span class="sbar${c.mf?' on':''}"><i style="width:${w.toFixed(0)}%"></i></span></article>`;
-  }).join('')||`<p class="noclaims">${K.view==='todo'?'Semua klaim di antrean sudah diperiksa.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan kapasitas.'}</p>`;
+    const reason=d>=0?`${DRIVER[d]}: ${d===0&&c.hr!=null?pct(c.hr)+' didukung perawatan':featText(c,d)}`:c.rf?`${c.nSec} diagnosis sekunder, lazim ${one(c.careDx)}`:'';
+    return cardHtml({id:c.id,pfx:'k',sep:c.sep,st:c.st,current:K.sel===c,rv:c.review?CREV[c.review.status]:'',
+      title:`Kelompok ${esc(c.grp)}, tingkat ${roman(c.sev)}`,
+      meta:`<span class="num sepn">${esc(c.sep)}</span><span class="msub">RS ${esc(c.rs)} · rawat ${c.los} hari · pulang ${esc(c.disTxt||c.admTxt)}</span>`,
+      why:`<b>${STATUS[c.st]}</b>${reason?' · '+esc(reason):''}`});
+  }).join('')||`<li class="noclaims">${q?`Tidak ada klaim yang cocok dengan “${esc(q)}”. Hapus pencarian untuk melihat semua.`:K.rs?`Tidak ada klaim RS ${esc(K.rs)} di daftar ini.`:K.view==='todo'?'Semua klaim di antrean sudah diperiksa. Ekspor CSV untuk melaporkan hasilnya.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan kapasitas pemeriksaan.'}</li>`;
   $('kdExport').href=`/api/coding/batches/${K.batch.id}/export.csv?k=${K.k}`;
 }
-$('kdRows').addEventListener('click',e=>{const el=e.target.closest('.claim[data-id]'); if(el&&K.byId[el.dataset.id]) select(K.byId[el.dataset.id],true)});
+listKeys($('kdRows'));
+$('kdSearch').addEventListener('input',e=>{K.q=e.target.value; K.limit=PAGE; renderRows()});
+$('kdRows').addEventListener('click',e=>{const el=e.target.closest('.claim[data-id]'); if(el&&K.byId[el.dataset.id]) select(K.byId[el.dataset.id],true,e.detail===0)});
 $('kdLede').addEventListener('click',e=>{if(e.target.id==='kdClearRs'){K.rs=null; K.limit=PAGE; renderRows()}});
 $('kdSeg').addEventListener('click',e=>{const b=e.target.closest('button[data-kview]'); if(b){K.view=b.dataset.kview; K.limit=PAGE; renderRows()}});
 $('kdMore').addEventListener('click',()=>{K.limit+=PAGE; renderRows()});
+const tabs=bindTabs($('kdTabs'),$('kdBody'),name=>{K.tab=name});
 
 function topDriver(c){if(!c.phi)return -1;let b=0;for(let i=1;i<c.phi.length;i++)if(c.phi[i]>c.phi[b])b=i;return b}
 function featText(c,i){
@@ -165,10 +182,16 @@ function featText(c,i){
 }
 
 /* ---------- klaim terpilih ---------- */
-async function select(c,user){
+async function select(c,user,focus){
   if(!c) return;
-  K.sel=c; K.draft=null; renderRows(); renderWhy();
+  K.sel=c; K.draft=null;
+  if(focus){const i=queueList().indexOf(c); if(i>=K.limit) K.limit=Math.ceil((i+1)/PAGE)*PAGE}
+  renderRows(); renderWhy();
   if(user) openSheet($('kdWhy'));
+  if(focus&&!(user&&MQ.matches)){
+    const card=document.querySelector(`#kdRows .claim[data-id="${c.id}"]`); if(card) card.scrollIntoView({block:'nearest'});
+    requestAnimationFrame(()=>focusDetail($('kdWhy')));
+  }
   await loadDetail(c);
 }
 async function loadDetail(c){
@@ -198,7 +221,7 @@ function reasonsFor(c){
   return {reasons,next};
 }
 function renderWhy(){
-  const c=K.sel, box=$('kdWhy'); if(!c){box.innerHTML='';return}
+  const c=K.sel, box=$('kdWhy'); if(!c){box.innerHTML='<div class="empty-detail"><p>Pilih klaim di daftar untuk melihat alasannya dan mencatat keputusan.</p></div>';return}
   const phi=c.phi, b=K.batch, h=K.hmap[c.rs], N=b.compared;
   const verdict={both:'Ditandai aturan koding dan lapisan anomali',rule:'Ditandai aturan koding saja',model:'Ditandai lapisan anomali saja',clear:'Tidak masuk antrean dengan pengaturan ini'}[c.st];
   const implied=c.implied?`menyerupai tingkat ${roman(c.implied)}`:'tidak dapat dinilai';
@@ -218,63 +241,43 @@ function renderWhy(){
   }
   const {reasons,next}=reasonsFor(c);
   const rv=c.review, draft=K.draft&&K.draft.id===c.id?K.draft:{status:rv?rv.status:'',note:rv?rv.note:'',resp:rv?rv.rsResponse||'':''};
-  const opt=(v,t,sub)=>`<label class="opt"><input type="radio" name="kdStatus" value="${v}"${draft.status===v?' checked':''}><span class="t">${t}<span class="s">${sub}</span></span></label>`;
-  const tag=b.labelled?`<span class="tag">Label sintetis: ${c.label?'upcoding disisipkan':'klaim biasa'}</span>`:'';
-  box.innerHTML=`<header><button type="button" class="back" data-act="close" aria-label="Kembali ke antrean"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Antrean</button><h2>Klaim terpilih</h2>${tag}</header>
-  <div class="body">
-    <div class="vhead st-${c.st}">
-      <div class="idline"><span class="num">${esc(c.sep)}</span><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span></div>
-      <p class="verdict">${verdict}</p>
-      <p class="herometa">Kelompok ${esc(c.grp)} · dikodekan tingkat ${roman(c.sev)}${c.implied&&c.implied!==c.sev?`, perawatan ${implied.replace('menyerupai ','')}`:''}</p>
-    </div>
-    <form class="review" id="kdReviewForm">
-      <h3>Keputusan verifikator</h3>
-      <p class="decided">${rv?`<b>${CREV[rv.status]}</b> oleh ${esc(rv.by)}, ${esc(when(rv.at))}`:'Belum ada keputusan.'}</p>
-      <fieldset class="opts"><legend class="sr">Keputusan</legend>
-        ${opt('confirmed','Upcoding dikonfirmasi','tingkat tidak didukung rekam medis')}
-        ${opt('cleared','Dinyatakan wajar','tingkat sesuai rekam medis')}
-        ${opt('docs_requested','Rekam medis diminta','menunggu jawaban rumah sakit')}
-      </fieldset>
-      <label for="kdNote">Catatan</label>
-      <textarea id="kdNote" maxlength="1000" placeholder="Apa yang diperiksa pada rekam medis, dan apa yang ditemukan">${esc(draft.note)}</textarea>
-      <label for="kdResp">Tanggapan rumah sakit <span class="s">(bila rekam medis diminta)</span></label>
-      <textarea id="kdResp" maxlength="1000" placeholder="Dokumen yang dikirim RS dan penjelasannya">${esc(draft.resp)}</textarea>
-      <div class="btnrow">
-        <button type="submit" class="btn">Simpan keputusan</button>
-        ${rv?'<button type="button" class="btn ghost" id="kdReopen">Buka ulang</button>':''}
-      </div>
-    </form>
-    <dl class="facts">
-      <div><dt>Rumah sakit</dt><dd>${esc(c.rs)} · Kelas ${esc(c.kelasRs||'?')}</dd></div>
-      <div><dt>Masuk – pulang</dt><dd>${esc(c.admTxt)} – ${esc(c.disTxt)} · LOS ${c.los}</dd></div>
-      <div><dt>INA-CBG</dt><dd><span class="num">${esc(c.cbg)}</span> ${esc(c.cbgDesc||'')}</dd></div>
-      <div><dt>Diagnosis · prosedur</dt><dd class="num">${esc(c.diag||'-')} · ${esc(c.proc||'-')}</dd></div>
-      <div><dt>Tarif INA-CBG</dt><dd class="num">${rp(c.tarif)}${c.uplift>0?` · selisih perkiraan ${rp(c.uplift)}`:''}</dd></div>
-    </dl>
-    <div class="stage"><h3>Tahap 2 · Kasus sejenis</h3><p>${s1}</p></div>
-    <div class="stage"><h3>Tahap 2 · Dukungan perawatan</h3><p>${s2}</p></div>
-    <div class="stage"><h3>Tahap 3 · Pola rumah sakit</h3><p>${s3}</p></div>
-    <div class="stage"><h3>Tahap 3 · Lapisan anomali</h3><p>${s4}</p></div>
-    <div class="stage"><h3>Tahap 4 · Apa yang menaikkan skor</h3>${bars}</div>
-    <div class="stage"><h3>Untuk verifikator</h3>
-      <ul class="reasons">${reasons.map(r=>`<li>${r}</li>`).join('')}</ul>
-      ${next?`<p><b>Langkah berikut.</b> ${next}</p>`:''}
-    </div>
-  </div>`;
+  setPanel(box,detailHtml({
+    panelId:'kdWhy',
+    ids:{form:'kdReviewForm',note:'kdNote',resp:'kdResp',reopen:'kdReopen',radio:'kdStatus'},
+    tag:b.labelled?`<span class="tag">Label sintetis · ${c.label?'upcoding disisipkan':'klaim biasa'}</span>`:'',
+    st:c.st, status:STATUS[c.st], sep:c.sep, verdict,
+    hero:`Kelompok ${esc(c.grp)} · dikodekan tingkat ${roman(c.sev)}${c.implied&&c.implied!==c.sev?`, perawatan ${implied.replace('menyerupai ','')}`:''}`,
+    reasonsTitle:c.st==='clear'?'Penjelasan':'Mengapa ditandai', reasons, next,
+    rv, draft, labels:CREV,
+    opts:[['confirmed','Upcoding dikonfirmasi','tingkat tidak didukung rekam medis'],['cleared','Dinyatakan wajar','tingkat sesuai rekam medis'],['docs_requested','Rekam medis diminta','menunggu jawaban rumah sakit']],
+    notePh:'Apa yang diperiksa pada rekam medis, dan apa yang ditemukan', respPh:'Dokumen yang dikirim RS dan penjelasannya',
+    facts:[
+      ['Rumah sakit',`${esc(c.rs)} · Kelas ${esc(c.kelasRs||'?')}`],
+      ['Masuk – pulang',`${esc(c.admTxt)} – ${esc(c.disTxt)} · LOS ${c.los}`],
+      ['INA-CBG',`<span class="num">${esc(c.cbg)}</span> ${esc(c.cbgDesc||'')}`],
+      ['Diagnosis · prosedur',`${esc(c.diag||'-')} · ${esc(c.proc||'-')}`,'num'],
+      ['Tarif INA-CBG',rp(c.tarif)+(c.uplift>0?` · selisih perkiraan ${rp(c.uplift)}`:''),'num']
+    ],
+    stages:[['Tahap 2 · Kasus sejenis',`<p>${s1}</p>`],['Tahap 2 · Dukungan perawatan',`<p>${s2}</p>`],['Tahap 3 · Pola rumah sakit',`<p>${s3}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s4}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]],
+    open:S.foldOpen}));
 }
 $('kdWhy').addEventListener('input',e=>{
   const f=e.target.closest('#kdReviewForm'); if(!f||!K.sel) return;
   const st=f.querySelector('input[name=kdStatus]:checked');
   K.draft={id:K.sel.id,status:st?st.value:'',note:$('kdNote').value,resp:$('kdResp').value};
+  syncResp(f);
 });
-async function saveReview(status,note,resp){
+$('kdWhy').addEventListener('toggle',e=>{if(e.target.classList&&e.target.classList.contains('fold')) S.foldOpen=e.target.open},true);
+async function saveReview(status,note,resp,go){
   const c=K.sel;
   try{
     const d=await api('PUT','/api/coding/claims/'+c.id+'/review',{status,note,rsResponse:resp||''});
     Object.assign(c,d,{full:true}); K.draft=null;
     update();
-    toast(status?'Keputusan tersimpan: '+CREV[status]+'.':'Klaim dibuka ulang.');
-    if(status) closeSheet();
+    if(!status){toast('Klaim dibuka ulang.'); return}
+    const next=go?nextAfter(queueList(),c):null;
+    if(next){toast(`Keputusan tersimpan: ${CREV[status]}. Klaim berikutnya dibuka.`); select(next,false,true)}
+    else{toast(go?`Keputusan tersimpan: ${CREV[status]}. Tidak ada klaim lain yang menunggu.`:`Keputusan tersimpan: ${CREV[status]}.`); closeSheet(); if(!MQ.matches) focusDetail($('kdWhy'))}
   }catch(e){fail(e)}
 }
 $('kdWhy').addEventListener('submit',e=>{
@@ -282,14 +285,14 @@ $('kdWhy').addEventListener('submit',e=>{
   e.preventDefault();
   const st=e.target.querySelector('input[name=kdStatus]:checked');
   if(!st){toast('Pilih keputusan terlebih dahulu.',true);return}
-  saveReview(st.value,$('kdNote').value,$('kdResp').value);
+  saveReview(st.value,$('kdNote').value,$('kdResp').value,!!(e.submitter&&e.submitter.value==='next'));
 });
 $('kdWhy').addEventListener('click',e=>{if(e.target.id==='kdReopen') saveReview(null,'',''); if(e.target.closest('[data-act=close]')) closeSheet()});
 
 /* ---------- pengaturan, unggah, hapus ---------- */
 function update(){
   if(!K.batch) return;
-  classify(); const n=counts();
+  classify(); const n=counts(); K.cnt=n;
   $('kdKOut').textContent=K.k;
   renderHead(); renderPipe(n); renderKpis(n); renderUnsaved(); renderHosp(n); renderRows(); renderWhy();
 }
@@ -301,28 +304,13 @@ $('kdSave').addEventListener('click',async()=>{
     K.batch=Object.assign(K.batch,saved); K.k=K.batch.topK; update(); toast('Kapasitas batch ini tersimpan.');
   }catch(e){fail(e)}
 });
-$('kdUpload').addEventListener('submit',async e=>{
-  e.preventDefault();
-  const f=$('kdFile').files[0], msg=$('kdUpMsg'), btn=$('kdUpBtn');
-  if(!f){msg.textContent='Pilih berkas terlebih dahulu.';return}
-  if(S.config&&f.size>S.config.maxUploadMb*1024*1024){msg.textContent=`Berkas lebih besar dari ${S.config.maxUploadMb} MB, batas untuk prototype ini.`;return}
-  const fd=new FormData(); fd.append('file',f); fd.append('name',$('kdName').value);
-  btn.disabled=true; msg.textContent='Mengunggah dan memeriksa. Ini bisa memakan beberapa detik.';
-  try{
-    const b=await api('POST','/api/coding/batches',fd);
-    e.target.reset(); msg.textContent=`${dots(b.rowsRead)} klaim dibaca, ${dots(b.compared)} klaim II/III dibandingkan. ${b.queued} masuk antrean.`;
-    K.batch=null; await loadList(); await loadBatch(b.id);
-    $('kdEmpty').hidden=true; $('kdBody').hidden=false; $('kdSel').closest('.field').hidden=false;
-    $('kdDelete').hidden=!(S.user.role==='supervisor'||S.user.guest);
-    window.scrollTo({top:0,behavior:'smooth'});
-  }catch(err){if(!err.auth) msg.textContent=err.message+' Tidak ada yang disimpan.'}
-  finally{btn.disabled=false}
-});
-$('kdDelete').addEventListener('click',async()=>{
-  const b=K.batch; if(!b) return;
-  if(!window.confirm(`Hapus "${b.name}" beserta ${b.reviewed} keputusan yang tercatat? Tindakan ini tidak bisa dibatalkan.`)) return;
-  try{await api('DELETE','/api/coding/batches/'+b.id); toast('Batch dihapus.'); K.batch=null; K.claims=[]; K.sel=null; await open()}catch(err){fail(err)}
-});
 
-window.VKCoding={open,reset};
+/* unggah dan hapus ada di halaman Berkas; di sini hanya menandai batch yang akan dibuka */
+function focus(id){K.want=id}
+function forget(id){
+  if(K.want===id) K.want=null;
+  if(K.batch&&K.batch.id===id){K.batch=null; K.claims=[]; K.sel=null}
+}
+
+window.VKCoding={open,reset,focus,forget};
 })();

@@ -7,7 +7,7 @@ import hmac
 import secrets
 import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 
 from .config import settings
 
@@ -52,25 +52,54 @@ def card_token(nokartu: str) -> str:
     return "P-" + base64.b32encode(mac[:5]).decode().rstrip("=")
 
 
+def client_ip(request) -> str:
+    """The caller's address for rate limits. With PROXY_HOPS = n, the n-th entry from the right of
+    X-Forwarded-For (the one our own proxy wrote); entries to its left come from the client and are
+    ignored. With 0 hops, or a header too short to trust, the socket address."""
+    hops = settings.proxy_hops
+    if hops > 0:
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops][:64]
+    return request.client.host if request.client else "?"
+
+
 class LoginLimiter:
-    """At most `limit` failed sign-ins per key in `window` seconds. In memory, single process."""
+    """At most `limit` failed sign-ins per key in `window` seconds. In memory, single process.
+
+    Only keys that have failed are stored, and expired keys are swept, so the table cannot grow
+    from keys that never fail."""
+
+    _SWEEP_AT = 2048
 
     def __init__(self, limit: int = 8, window: int = 600) -> None:
         self.limit, self.window = limit, window
-        self._fails: dict[str, deque] = defaultdict(deque)
+        self._fails: dict[str, deque] = {}
         self._lock = threading.Lock()
 
+    def _live(self, key: str, now: float):
+        q = self._fails.get(key)
+        if q is None:
+            return None
+        while q and now - q[0] > self.window:
+            q.popleft()
+        if not q:
+            del self._fails[key]
+            return None
+        return q
+
     def blocked(self, key: str) -> bool:
-        now = time.monotonic()
         with self._lock:
-            q = self._fails[key]
-            while q and now - q[0] > self.window:
-                q.popleft()
-            return len(q) >= self.limit
+            q = self._live(key, time.monotonic())
+            return q is not None and len(q) >= self.limit
 
     def fail(self, key: str) -> None:
+        now = time.monotonic()
         with self._lock:
-            self._fails[key].append(time.monotonic())
+            if len(self._fails) >= self._SWEEP_AT:
+                for k in list(self._fails):
+                    self._live(k, now)
+            self._fails.setdefault(key, deque()).append(now)
 
     def reset(self, key: str) -> None:
         with self._lock:

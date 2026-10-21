@@ -25,17 +25,17 @@
     <span>VeriKlaim</span>
   </a>
   <nav id="nav" aria-label="Bagian">
-    <a href="#/queue" data-route="queue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg><span>Antrean</span></a>
+    <a href="#/queue" data-route="queue"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg><span>Top-up</span></a>
     <a href="#/coding" data-route="coding"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="m9 13 2 2 4-4"/></svg><span>Koding</span></a>
-    <a href="#/batches" data-route="batches"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-5M9.5 14.5 12 12l2.5 2.5"/></svg><span>Batch</span></a>
-    <a href="#/robust" data-route="robust"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/></svg><span>Ketahanan</span></a>
+    <a href="#/batches" data-route="batches"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-5M9.5 14.5 12 12l2.5 2.5"/></svg><span>Berkas</span></a>
+    <button type="button" class="morebtn" id="moreBtn" aria-expanded="false" aria-controls="navSec"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span>Lainnya</span></button>
     <div class="sec" id="navSec">
       <a href="#/refs" data-route="refs"><span>Harga acuan</span></a>
+      <a href="#/robust" data-route="robust"><span>Ketahanan</span></a>
       <a href="#/audit" data-route="audit" data-role="audit"><span>Jejak audit</span></a>
       <a href="#/feedback" data-route="feedback"><span>Umpan balik</span></a>
       <a href="#/about" data-route="about"><span>Tentang</span></a>
     </div>
-    <button type="button" class="morebtn" id="moreBtn" aria-expanded="false" aria-controls="navSec"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></svg><span>Lainnya</span></button>
   </nav>
   <div class="who">
     <span class="av" id="whoAv" aria-hidden="true"></span>
@@ -84,10 +84,11 @@
     <p class="hint">Hanya data sintetis. Peran tim: verifikator mencatat keputusan; supervisor juga mengatur kapasitas antrean, mengubah harga acuan, membaca jejak audit, dan melihat umpan balik.</p>
   </section>
 
-  <!-- antrean -->
+  <!-- antrean top-up -->
   <section id="view-queue" class="stack" hidden>
     <div class="mast">
       <div>
+        <p class="kicker">Penyaringan top-up obat dan alkes</p>
         <h1 id="batchTitle">Antrean pemeriksaan</h1>
         <p class="databar" id="databar"></p>
       </div>
@@ -100,83 +101,104 @@
     <div class="empty" id="queueEmpty" hidden>
       <h2>Belum ada batch</h2>
       <p>Unggah berkas TXT E-Klaim untuk mulai menyaring.</p>
-      <a class="btn" href="#/batches">Ke halaman Batch</a>
+      <a class="btn" href="#/batches">Ke halaman Berkas</a>
     </div>
 
     <div id="queueBody" class="stack">
       <section class="panel tour" id="tour" hidden aria-labelledby="tourTitle"></section>
-      <p class="notice" id="labelNote" hidden></p>
-      <p class="notice" id="refNote" hidden><b>Harga acuan contoh.</b> Harga bawaan prototype ini ilustratif, bukan data e-Katalog. Kelipatan tagihan dan nilai rupiah di halaman ini menunjukkan cara kerja, bukan harga sebenarnya. <a href="#/refs">Lihat tabel harga acuan</a>.</p>
+      <p class="banner" id="dataBanner" hidden></p>
 
-      <ol class="pipe" id="pipe" aria-label="Tahap penyaringan"></ol>
+      <div class="strip" id="kpis" role="group" aria-label="Ringkasan penyaringan"></div>
 
-      <section class="ctl" aria-label="Pengaturan">
-        <div class="field">
-          <label for="thr"><b>Aturan tagihan.</b> Tandai klaim yang tagihan rumah sakitnya (TARIF_RS) di bawah <output id="thrOut" for="thr">100%</output> harga acuan item top-up.</label>
-          <input type="range" id="thr" min="60" max="200" step="10" value="100">
-        </div>
-        <div class="field">
-          <label for="kk"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kOut" for="kk">12</output> klaim paling tidak biasa ke antrean.</label>
-          <input type="range" id="kk" min="4" max="24" step="1" value="12">
-        </div>
-      </section>
-      <div class="unsaved" id="unsaved" hidden>
-        <span id="unsavedText"></span>
-        <span class="btnrow">
-          <button type="button" class="btn small" id="saveSettings" hidden>Simpan untuk semua</button>
-          <button type="button" class="btn ghost small" id="resetSettings">Kembalikan</button>
-        </span>
+      <div class="tabs" id="tabs" role="tablist" aria-label="Tampilan">
+        <button type="button" role="tab" data-tab="queue" aria-selected="true">Antrean</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false">Gambaran</button>
+        <button type="button" role="tab" data-tab="bias" aria-selected="false">Pemantauan bias</button>
       </div>
 
-      <section class="kpis" id="kpis" aria-label="Ringkasan penyaringan"></section>
-
-      <section class="panel chartcard">
-        <header><h2>Dua pemeriksaan untuk setiap klaim ber-top-up</h2></header>
-        <p class="lede">Setiap tanda adalah satu klaim dengan top-up Special Drug atau Special Prosthesis. Di kiri garis tegak, seluruh tagihan rumah sakit lebih kecil dari harga acuan barang yang diklaim. Di atas garis mendatar, klaim tidak biasa pada lama rawat, top-up berulang, atau volume, walaupun tagihannya tampak wajar.</p>
-        <div class="legend" id="legend"></div>
-        <div class="chart" id="chart"><div class="tip" id="tip" hidden></div></div>
-      </section>
-
-      <div class="work">
-        <section class="panel why" id="why"></section>
-        <section class="panel queue">
-          <header>
-            <h2>Antrean</h2>
-            <div class="toolbar">
-              <div class="seg" role="group" aria-label="Baris yang ditampilkan">
-                <button type="button" data-view="flagged" aria-pressed="true">Di antrean</button>
-                <button type="button" data-view="todo" aria-pressed="false">Belum diperiksa</button>
-                <button type="button" data-view="all" aria-pressed="false">Semua klaim</button>
+      <div class="stack" data-tabpanel="queue" role="tabpanel">
+        <details class="fold" id="ctlFold">
+          <summary><span class="t">Pengaturan antrean</span><span class="sum" id="ctlSum"></span></summary>
+          <div class="foldbody">
+            <section class="ctl" aria-label="Pengaturan">
+              <div class="field">
+                <label for="thr"><b>Aturan tagihan.</b> Tandai klaim yang tagihan rumah sakitnya (TARIF_RS) di bawah <output id="thrOut" for="thr">100%</output> harga acuan item top-up.</label>
+                <input type="range" id="thr" min="60" max="200" step="10" value="100">
               </div>
-              <a class="btn ghost small" id="exportCsv" href="#" download>Ekspor CSV</a>
+              <div class="field">
+                <label for="kk"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kOut" for="kk">12</output> klaim paling tidak biasa ke antrean.</label>
+                <input type="range" id="kk" min="4" max="24" step="1" value="12">
+              </div>
+            </section>
+            <div class="unsaved" id="unsaved" hidden>
+              <span id="unsavedText"></span>
+              <span class="btnrow">
+                <button type="button" class="btn small" id="saveSettings" hidden>Simpan untuk semua</button>
+                <button type="button" class="btn ghost small" id="resetSettings">Kembalikan</button>
+              </span>
             </div>
-          </header>
-          <p class="lede" id="queueLede"></p>
-          <div class="claims" id="rows" role="list" aria-label="Klaim di antrean"></div>
+          </div>
+        </details>
+
+        <div class="work">
+          <section class="panel queue" aria-labelledby="qTitle">
+            <header>
+              <h2 class="qh" id="qTitle">Antrean</h2>
+              <div class="toolbar">
+                <div class="seg" role="group" aria-label="Baris yang ditampilkan">
+                  <button type="button" data-view="flagged" aria-pressed="true">Di antrean</button>
+                  <button type="button" data-view="todo" aria-pressed="false">Belum diperiksa</button>
+                  <button type="button" data-view="all" aria-pressed="false">Semua</button>
+                </div>
+                <a class="btn ghost small" id="exportCsv" href="#" download>Ekspor CSV</a>
+              </div>
+            </header>
+            <div class="searchrow"><label class="sr" for="qSearch">Cari klaim</label><input type="search" id="qSearch" placeholder="Cari SEP, RS, atau item" autocomplete="off" spellcheck="false"></div>
+            <p class="lede" id="queueLede" aria-live="polite"></p>
+            <ul class="claims" id="rows" role="list" aria-labelledby="qTitle"></ul>
+            <div class="btnrow" id="qMoreRow" hidden><button type="button" class="btn ghost small" id="qMore"></button></div>
+          </section>
+          <section class="panel why" id="why" aria-label="Rincian klaim terpilih"></section>
+        </div>
+      </div>
+
+      <div class="stack" data-tabpanel="about" role="tabpanel" hidden>
+        <ol class="pipe" id="pipe" aria-label="Tahap penyaringan"></ol>
+        <p class="plain" id="skipNote" hidden></p>
+        <p class="plain" id="valNote"></p>
+        <p class="notice" id="labelNote" hidden></p>
+        <p class="notice" id="refNote" hidden><b>Harga acuan contoh.</b> Harga bawaan prototype ini ilustratif, bukan data e-Katalog. Kelipatan tagihan dan nilai rupiah di halaman ini menunjukkan cara kerja, bukan harga sebenarnya. <a href="#/refs">Lihat tabel harga acuan</a>.</p>
+        <section class="panel chartcard">
+          <header><h2>Dua pemeriksaan untuk setiap klaim ber-top-up</h2></header>
+          <p class="lede">Setiap tanda adalah satu klaim dengan top-up Special Drug atau Special Prosthesis. Di kiri garis tegak, seluruh tagihan rumah sakit lebih kecil dari harga acuan barang yang diklaim. Di atas garis mendatar, klaim tidak biasa pada lama rawat, top-up berulang, atau volume, walaupun tagihannya tampak wajar. Pilih sebuah tanda untuk membukanya di antrean.</p>
+          <div class="legend" id="legend"></div>
+          <div class="chart" id="chart"><div class="tip" id="tip" hidden></div></div>
         </section>
       </div>
 
-      <section class="panel" id="rsPanel">
-        <header><h2>Tingkat flag per rumah sakit</h2></header>
-        <p class="lede">Pemantauan bias: rumah sakit yang jauh lebih sering masuk antrean dibanding rata-rata perlu dilihat ulang, termasuk kemungkinan penyebab yang wajar seperti pusat rujukan atau harga beli di bawah katalog.</p>
-        <div class="tblwrap">
-          <table>
-            <thead><tr><th>Rumah sakit</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
-            <tbody id="rsRows"></tbody>
-          </table>
-        </div>
-      </section>
+      <div class="stack" data-tabpanel="bias" role="tabpanel" hidden>
+        <section class="panel" id="rsPanel">
+          <header><h2>Tingkat flag per rumah sakit</h2></header>
+          <p class="lede">Rumah sakit yang jauh lebih sering masuk antrean dibanding rata-rata perlu dilihat ulang, termasuk kemungkinan penyebab yang wajar seperti pusat rujukan atau harga beli di bawah katalog.</p>
+          <div class="tblwrap">
+            <table>
+              <thead><tr><th>Rumah sakit</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
+              <tbody id="rsRows"></tbody>
+            </table>
+          </div>
+        </section>
 
-      <section class="panel" id="codePanel">
-        <header><h2>Tingkat flag per kode top-up</h2></header>
-        <p class="lede">Pemantauan yang sama menurut item top-up. Obat khusus tertentu memang diberikan berulang dan penggantian sendi bisa dua sisi, jadi kode dengan tingkat flag tinggi perlu dilihat bersama alasannya sebelum ambangnya diubah.</p>
-        <div class="tblwrap">
-          <table>
-            <thead><tr><th>Kode · item</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
-            <tbody id="codeRows"></tbody>
-          </table>
-        </div>
-      </section>
+        <section class="panel" id="codePanel">
+          <header><h2>Tingkat flag per kode top-up</h2></header>
+          <p class="lede">Pemantauan yang sama menurut item top-up. Obat khusus tertentu memang diberikan berulang dan penggantian sendi bisa dua sisi, jadi kode dengan tingkat flag tinggi perlu dilihat bersama alasannya sebelum ambangnya diubah.</p>
+          <div class="tblwrap">
+            <table>
+              <thead><tr><th>Kode · item</th><th class="r">Klaim</th><th class="r">Di antrean</th><th>Tingkat flag</th><th class="r">Dikonfirmasi</th><th class="r">Dinyatakan wajar</th><th class="r">Menunggu dokumen</th></tr></thead>
+              <tbody id="codeRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </div>
   </section>
 
@@ -184,6 +206,7 @@
   <section id="view-coding" class="stack" hidden>
     <div class="mast">
       <div>
+        <p class="kicker">Indikator upcoding</p>
         <h1 id="kdTitle">Pemeriksaan koding</h1>
         <p class="databar" id="kdBar"></p>
       </div>
@@ -196,95 +219,102 @@
     <div class="empty" id="kdEmpty" hidden>
       <h2>Belum ada batch koding</h2>
       <p>Unggah berkas TXT E-Klaim rawat inap dari beberapa rumah sakit untuk memeriksa indikasi upcoding.</p>
+      <a class="btn" href="#/batches">Ke halaman Berkas</a>
     </div>
 
     <div id="kdBody" class="stack">
-      <p class="notice"><b>Yang diperiksa, dan yang tidak.</b> Halaman ini menandai klaim yang tingkat keparahannya (I, II, III pada kode INA-CBG) tidak didukung oleh perawatan yang tercatat di klaim itu dan tidak sejalan dengan pola rumah sakit lain. Ini <b>indikator upcoding</b>, bukan penilaian kebutuhan medis. Layak atau tidaknya sebuah perawatan hanya dapat dinilai dari rekam medis oleh verifikator medis; yang dikerjakan di sini adalah memilih klaim mana yang paling layak dibuka rekam medisnya.</p>
-      <p class="notice" id="kdLabelNote" hidden></p>
-      <p class="notice" id="kdSmallNote" hidden></p>
+      <p class="banner" id="kdBanner"></p>
+      <p class="banner warn" id="kdSmallNote" hidden></p>
 
-      <ol class="pipe" id="kdPipe" aria-label="Tahap pemeriksaan koding"></ol>
+      <div class="strip" id="kdKpis" role="group" aria-label="Ringkasan pemeriksaan koding"></div>
 
-      <section class="ctl one" aria-label="Pengaturan">
-        <div class="field">
-          <label for="kdK"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kdKOut" for="kdK">12</output> klaim tingkat II atau III yang paling tidak didukung ke antrean, di samping klaim yang lolos aturan koding.</label>
-          <input type="range" id="kdK" min="4" max="60" step="1" value="12">
-        </div>
-      </section>
-      <div class="unsaved" id="kdUnsaved" hidden>
-        <span id="kdUnsavedText"></span>
-        <span class="btnrow">
-          <button type="button" class="btn small" id="kdSave" hidden>Simpan untuk semua</button>
-          <button type="button" class="btn ghost small" id="kdReset">Kembalikan</button>
-        </span>
+      <div class="tabs" id="kdTabs" role="tablist" aria-label="Tampilan">
+        <button type="button" role="tab" data-tab="queue" aria-selected="true">Antrean</button>
+        <button type="button" role="tab" data-tab="hosp" aria-selected="false" id="kdTabHosp">Rumah sakit</button>
+        <button type="button" role="tab" data-tab="about" aria-selected="false">Gambaran</button>
       </div>
 
-      <section class="kpis" id="kdKpis" aria-label="Ringkasan pemeriksaan koding"></section>
-
-      <div class="work">
-        <section class="panel why" id="kdWhy"></section>
-        <section class="panel queue">
-          <header>
-            <h2>Antrean koding</h2>
-            <div class="toolbar">
-              <div class="seg" id="kdSeg" role="group" aria-label="Baris yang ditampilkan">
-                <button type="button" data-kview="queue" aria-pressed="true">Di antrean</button>
-                <button type="button" data-kview="todo" aria-pressed="false">Belum diperiksa</button>
+      <div class="stack" data-tabpanel="queue" role="tabpanel">
+        <details class="fold" id="kdFold">
+          <summary><span class="t">Pengaturan antrean</span><span class="sum" id="kdSum"></span></summary>
+          <div class="foldbody">
+            <section class="ctl one" aria-label="Pengaturan">
+              <div class="field">
+                <label for="kdK"><b>Kapasitas verifikator.</b> Lapisan anomali mengirim <output id="kdKOut" for="kdK">12</output> klaim tingkat II atau III yang paling tidak didukung ke antrean, di samping klaim yang ditandai aturan koding.</label>
+                <input type="range" id="kdK" min="4" max="60" step="1" value="12">
               </div>
-              <a class="btn ghost small" id="kdExport" href="#" download>Ekspor CSV</a>
+            </section>
+            <div class="unsaved" id="kdUnsaved" hidden>
+              <span id="kdUnsavedText"></span>
+              <span class="btnrow">
+                <button type="button" class="btn small" id="kdSave" hidden>Simpan untuk semua</button>
+                <button type="button" class="btn ghost small" id="kdReset">Kembalikan</button>
+              </span>
             </div>
-          </header>
-          <p class="lede" id="kdLede"></p>
-          <div class="claims" id="kdRows" role="list" aria-label="Klaim di antrean koding"></div>
-          <div class="btnrow" id="kdMoreRow" hidden><button type="button" class="btn ghost small" id="kdMore"></button></div>
+          </div>
+        </details>
+
+        <div class="work">
+          <section class="panel queue" aria-labelledby="kdQTitle">
+            <header>
+              <h2 class="qh" id="kdQTitle">Antrean koding</h2>
+              <div class="toolbar">
+                <div class="seg" id="kdSeg" role="group" aria-label="Baris yang ditampilkan">
+                  <button type="button" data-kview="queue" aria-pressed="true">Di antrean</button>
+                  <button type="button" data-kview="todo" aria-pressed="false">Belum diperiksa</button>
+                </div>
+                <a class="btn ghost small" id="kdExport" href="#" download>Ekspor CSV</a>
+              </div>
+            </header>
+            <div class="searchrow"><label class="sr" for="kdSearch">Cari klaim</label><input type="search" id="kdSearch" placeholder="Cari SEP, RS, atau kelompok" autocomplete="off" spellcheck="false"></div>
+            <p class="lede" id="kdLede" aria-live="polite"></p>
+            <ul class="claims" id="kdRows" role="list" aria-labelledby="kdQTitle"></ul>
+            <div class="btnrow" id="kdMoreRow" hidden><button type="button" class="btn ghost small" id="kdMore"></button></div>
+          </section>
+          <section class="panel why" id="kdWhy" aria-label="Rincian klaim terpilih"></section>
+        </div>
+      </div>
+
+      <div class="stack" data-tabpanel="hosp" role="tabpanel" hidden>
+        <section class="panel" id="kdHospPanel">
+          <header><h2>Pola per rumah sakit</h2></header>
+          <p class="lede">Setiap klaim tingkat II atau III dibandingkan dengan rumah sakit lain pada kelompok kasus yang sama, jadi rumah sakit dengan kasus yang lebih berat tidak dirugikan. Rumah sakit yang jauh lebih sering mengodekan tingkat tinggi <b>dan</b> perawatannya kurang mendukung ditandai "Perlu ditinjau". Rumah sakit rujukan yang tingkat tingginya didukung lama rawat, ICU, ventilator, atau kematian tidak ditandai.</p>
+          <div class="tblwrap">
+            <table class="cardrows">
+              <thead><tr><th>Rumah sakit</th><th>Tingkat II/III dibanding RS lain</th><th>Dukungan perawatan</th><th>Status</th><th class="r">Klaim di antrean</th></tr></thead>
+              <tbody id="kdHosp"></tbody>
+            </table>
+          </div>
+          <div class="btnrow pad" id="kdHospMoreRow" hidden><button type="button" class="btn ghost small" id="kdHospMore"></button></div>
         </section>
       </div>
 
-      <section class="panel" id="kdHospPanel">
-        <header><h2>Pola per rumah sakit</h2></header>
-        <p class="lede">Setiap klaim tingkat II atau III dibandingkan dengan rumah sakit lain pada kelompok kasus yang sama, jadi rumah sakit dengan kasus yang lebih berat tidak dirugikan. Rumah sakit yang jauh lebih sering mengodekan tingkat tinggi <b>dan</b> perawatannya kurang mendukung ditandai "Perlu ditinjau". Rumah sakit rujukan yang tingkat tingginya didukung lama rawat, ICU, ventilator, atau kematian tidak ditandai.</p>
-        <div class="tblwrap">
-          <table class="cardrows">
-            <thead><tr><th>Rumah sakit</th><th>Tingkat II/III dibanding RS lain</th><th>Dukungan perawatan</th><th>Status</th><th class="r">Klaim di antrean</th></tr></thead>
-            <tbody id="kdHosp"></tbody>
-          </table>
-        </div>
-        <div class="btnrow" id="kdHospMoreRow" hidden><button type="button" class="btn ghost small" id="kdHospMore"></button></div>
-      </section>
+      <div class="stack" data-tabpanel="about" role="tabpanel" hidden>
+        <p class="notice"><b>Yang diperiksa, dan yang tidak.</b> Halaman ini menandai klaim yang tingkat keparahannya (I, II, III pada kode INA-CBG) tidak didukung oleh perawatan yang tercatat di klaim itu dan tidak sejalan dengan pola rumah sakit lain. Ini <b>indikator upcoding</b>, bukan penilaian kebutuhan medis. Layak atau tidaknya sebuah perawatan hanya dapat dinilai dari rekam medis oleh verifikator medis; yang dikerjakan di sini adalah memilih klaim mana yang paling layak dibuka rekam medisnya.</p>
+        <p class="notice" id="kdLabelNote" hidden></p>
+        <ol class="pipe" id="kdPipe" aria-label="Tahap pemeriksaan koding"></ol>
+        <p class="plain" id="kdValNote"></p>
+      </div>
     </div>
-
-    <form class="panel pad" id="kdUpload">
-      <h2>Periksa berkas lain</h2>
-      <p class="warn">Gunakan berkas TXT E-Klaim rawat inap dari beberapa rumah sakit, sintetis atau anonim dengan izin resmi. Pembanding adalah rumah sakit lain di berkas yang sama, jadi berkas dari satu rumah sakit saja hanya menghasilkan pemeriksaan per klaim. Server tidak membaca nama pasien, nomor RM, tanggal lahir, atau nomor kartu; berkas mentah tidak disimpan.</p>
-      <div class="formgrid">
-        <div class="field">
-          <label for="kdFile">Ekspor TXT biasa dari E-Klaim</label>
-          <input type="file" id="kdFile" accept=".txt,text/plain" required>
-        </div>
-        <div class="field">
-          <label for="kdName">Nama batch (opsional)</label>
-          <input type="text" id="kdName" maxlength="160" placeholder="Kelompok RS, periode">
-        </div>
-      </div>
-      <div class="btnrow">
-        <button type="submit" class="btn" id="kdUpBtn">Unggah dan periksa</button>
-        <a class="btn ghost" href="/assets/sample/veriklaim-sample-koding.txt" download>Unduh berkas contoh</a>
-        <button type="button" class="btn small danger" id="kdDelete" hidden>Hapus batch yang dipilih</button>
-      </div>
-      <p class="msg" id="kdUpMsg" role="status"></p>
-    </form>
   </section>
 
-  <!-- batch -->
+  <!-- berkas -->
   <section id="view-batches" class="stack" hidden>
     <div class="mast"><div>
       <h1>Berkas E-Klaim</h1>
-      <p class="sub">Setiap unggahan dibaca dan diskor di server, lalu disimpan sebagai satu batch dengan antreannya sendiri.</p>
+      <p class="sub">Setiap unggahan dibaca dan diperiksa di server, lalu disimpan sebagai satu batch dengan antreannya sendiri.</p>
     </div></div>
 
     <form class="panel pad" id="uploadForm">
-      <h2>Saring berkas baru</h2>
+      <div class="field">
+        <span class="lbl" id="upKindLbl">Jenis pemeriksaan</span>
+        <div class="seg" id="upKind" role="group" aria-labelledby="upKindLbl">
+          <button type="button" data-kind="topup" aria-pressed="true">Top-up</button>
+          <button type="button" data-kind="coding" aria-pressed="false">Koding</button>
+        </div>
+      </div>
       <p class="warn" id="upWarn">Unggah hanya berkas sintetis, atau berkas anonim dengan izin resmi. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.</p>
+      <p class="plain" id="upHint" hidden>Untuk Koding, gunakan ekspor rawat inap dari beberapa rumah sakit. Pembandingnya adalah rumah sakit lain di berkas yang sama, jadi berkas dari satu rumah sakit saja hanya menghasilkan pemeriksaan per klaim.</p>
       <div class="formgrid">
         <div class="field">
           <label for="upFile">Ekspor TXT biasa dari E-Klaim</label>
@@ -297,7 +327,7 @@
       </div>
       <div class="btnrow">
         <button type="submit" class="btn" id="upBtn">Unggah dan saring</button>
-        <a class="btn ghost" href="/assets/sample/veriklaim-sample-eklaim.txt" download>Unduh berkas contoh</a>
+        <a class="btn ghost" id="upSample" href="/assets/sample/veriklaim-sample-eklaim.txt" download>Unduh berkas contoh</a>
       </div>
       <p class="msg" id="upMsg" role="status"></p>
     </form>
@@ -306,7 +336,7 @@
       <header><h2>Batch tersimpan</h2></header>
       <div class="tblwrap">
         <table class="cardrows">
-          <thead><tr><th>Batch</th><th>Diunggah</th><th>Baris</th><th>Antrean</th><th></th></tr></thead>
+          <thead><tr><th>Batch</th><th>Diunggah</th><th>Isi</th><th>Antrean</th><th><span class="sr">Tindakan</span></th></tr></thead>
           <tbody id="batchRows"></tbody>
         </table>
       </div>
@@ -325,7 +355,7 @@
     <section class="panel">
       <div class="tblwrap">
         <table class="cardrows">
-          <thead><tr><th>Special CMG</th><th>Item</th><th>Jenis</th><th class="r">Harga acuan</th><th>Sumber</th><th>Diperbarui</th><th></th></tr></thead>
+          <thead><tr><th>Special CMG</th><th>Item</th><th>Jenis</th><th class="r">Harga acuan</th><th>Sumber</th><th>Diperbarui</th><th><span class="sr">Tindakan</span></th></tr></thead>
           <tbody id="refRows"></tbody>
         </table>
       </div>
@@ -336,7 +366,7 @@
       <p class="sub" id="cmgSub"></p>
       <div class="tblwrap">
         <table class="cardrows">
-          <thead><tr><th>Kode</th><th>Item</th><th>Jenis</th><th>Status harga acuan</th><th></th></tr></thead>
+          <thead><tr><th>Kode</th><th>Item</th><th>Jenis</th><th>Status harga acuan</th><th><span class="sr">Tindakan</span></th></tr></thead>
           <tbody id="cmgRows"></tbody>
         </table>
       </div>

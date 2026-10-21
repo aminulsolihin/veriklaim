@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import coding, db as db_module, eklaim, scoring, services
 from .config import settings
 from .db import AuditLog, Base, Batch, Claim, CodingBatch, CodingClaim, Feedback, ReferencePrice, SessionLocal, User, engine, get_db, iso, utcnow
-from .security import DUMMY_HASH, LoginLimiter, login_limiter, verify_password
+from .security import DUMMY_HASH, LoginLimiter, client_ip, login_limiter, verify_password
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("veriklaim")
@@ -58,7 +58,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="VeriKlaim", version="0.6.0", lifespan=lifespan,
+    title="VeriKlaim", version="0.6.2", lifespan=lifespan,
     docs_url=None if settings.production else "/api/docs", redoc_url=None,
     openapi_url=None if settings.production else "/api/openapi.json",
 )
@@ -220,7 +220,7 @@ class LoginIn(BaseModel):
 @app.post("/api/login", dependencies=[Depends(csrf)])
 def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     username = body.username.strip().lower()
-    key = "{}|{}".format(request.client.host if request.client else "?", username)
+    key = "{}|{}".format(client_ip(request), username)
     if login_limiter.blocked(key):
         raise HTTPException(429, "Terlalu banyak percobaan masuk yang gagal. Tunggu sepuluh menit, lalu coba lagi.")
     user = db.scalar(select(User).where(User.username == username))
@@ -257,7 +257,7 @@ def demo_login(request: Request, db: Session = Depends(get_db)):
     """Judge mode: sign in without an account and get a private copy of the synthetic sample."""
     if not settings.judge_mode:
         raise HTTPException(404, "Mode juri tidak aktif di server ini.")
-    key = request.client.host if request.client else "?"
+    key = client_ip(request)
     if guest_limiter.blocked(key):
         raise HTTPException(429, "Terlalu banyak sesi juri dari jaringan ini. Coba lagi dalam satu jam.")
     services.purge_guests(db)
@@ -416,9 +416,14 @@ def batch_delete(batch_id: int, user: User = Depends(current_user), db: Session 
     return {"ok": True}
 
 
+_PLAIN_NUMBER = re.compile(r"-?\d+(\.\d+)?")
+
+
 def _csv_cell(value) -> str:
-    """Neutralise cells a spreadsheet would run as a formula."""
+    """Neutralise cells a spreadsheet would run as a formula. A plain number such as -0.0123 stays a number."""
     s = "" if value is None else str(value)
+    if _PLAIN_NUMBER.fullmatch(s):
+        return s
     return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 
 

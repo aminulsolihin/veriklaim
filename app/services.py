@@ -83,6 +83,7 @@ def ingest(db: Session, text: str, *, name: str, filename: str, user: Optional[U
     audit(db, user, "batch_upload", batch_id=batch.id, detail={
         "name": batch.name, "rows": parsed["total"], "screened": len(rows),
         "no_topup": parsed["no_topup"], "no_reference_price": parsed["no_ref"], "unreadable": parsed["bad"],
+        "duplicate_sep": parsed["dup"],
     })
     db.commit()
     scoring.remember(batch.id, model)
@@ -274,7 +275,7 @@ def ingest_coding(db: Session, text: str, *, name: str, filename: str, user: Opt
     db.flush()
     db.add_all([CodingClaim(batch_id=batch.id, label=(labels or {}).get(r["sep"]), **_coding_claim_args(r)) for r in rows])
     audit(db, user, "coding_upload", batch_id=batch.id, detail={
-        "name": batch.name, "rows": parsed["total"], "read": len(rows), "unreadable": parsed["bad"],
+        "name": batch.name, "rows": parsed["total"], "read": len(rows), "unreadable": parsed["bad"], "duplicate_sep": parsed["dup"],
         "compared": batch.compared, "modul": "koding",
     })
     db.commit()

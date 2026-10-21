@@ -25,7 +25,7 @@ const ROLE={verifikator:'verifikator',supervisor:'supervisor',juri:'juri · tamu
 const PERAN={verifikator:'Verifikator / anti-fraud BPJS','koder-rs':'Koder / casemix RS',klinisi:'Dokter / nakes','manajemen-rs':'Manajemen RS',juri:'Juri / penilai',lainnya:'Lainnya'};
 const ROUTES=['queue','coding','batches','refs','robust','audit','feedback','about'];
 
-const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null};
+const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null,tab:'queue',limit:20,foldOpen:false,q:'',cnt:null};
 const UP_WARN=$('upWarn').textContent;
 let X1=5,Y0=0.3,Y1=0.76;
 
@@ -97,7 +97,7 @@ async function enter(){
   document.querySelectorAll('#nav a[data-role]').forEach(a=>{a.hidden=a.dataset.role==='audit'&&!(sup||guest)});
   $('refForm').hidden=!sup; $('saveSettings').hidden=!(sup||guest);
   $('footNote').textContent=guest?`Sesi juri: data Anda terpisah dan dihapus otomatis ${when(S.user.expiresAt)}.`:'Flag adalah permintaan pemeriksaan, bukan tuduhan.';
-  $('upWarn').textContent=guest?`Unggah hanya berkas uji sintetis; jangan unggah data peserta JKN riil. Satu berkas disaring paling banyak ${dots(S.config.maxClaims)} klaim ber-top-up. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; nomor kartu disimpan hanya sebagai token satu arah; berkas mentah tidak disimpan.`:UP_WARN;
+  setKind(UP_KIND);
   loadTour();
   refreshRefNote();
   await loadBatches();
@@ -118,15 +118,43 @@ function route(){
 }
 window.addEventListener('hashchange',route);
 
-/* menu "Lainnya" (ponsel) dan lembar rincian klaim */
+/* menu "Lainnya" dan lembar rincian klaim: fokus papan ketik dikelola */
 const MOBILE=window.matchMedia('(max-width:980px)');
-function closeMore(){$('nav').classList.remove('open'); $('moreBtn').setAttribute('aria-expanded','false')}
+function closeMore(back){
+  const was=$('nav').classList.contains('open');
+  $('nav').classList.remove('open'); $('moreBtn').setAttribute('aria-expanded','false');
+  if(was&&back) $('moreBtn').focus();
+}
 $('moreBtn').addEventListener('click',()=>{const o=!$('nav').classList.contains('open'); $('nav').classList.toggle('open',o); $('moreBtn').setAttribute('aria-expanded',String(o))});
 document.addEventListener('click',e=>{if(!e.target.closest('#nav')) closeMore()});
-window.addEventListener('hashchange',()=>{closeMore(); closeSheet()});
-function openSheet(el){if(!MOBILE.matches) return; el=el||$('why'); el.classList.add('sheet'); el.scrollTop=0; document.body.classList.add('sheet-open')}
-function closeSheet(){document.querySelectorAll('.why.sheet').forEach(e=>e.classList.remove('sheet')); document.body.classList.remove('sheet-open')}
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMore(); closeSheet()}});
+$('nav').addEventListener('focusout',e=>{if($('nav').classList.contains('open')&&e.relatedTarget&&!$('nav').contains(e.relatedTarget)) closeMore()});
+window.addEventListener('hashchange',()=>{closeMore(); closeSheet(false)});
+let sheetBack=null;
+function openSheet(el){
+  if(!MOBILE.matches) return; el=el||$('why');
+  const rows=el.id==='kdWhy'?'#kdRows':'#rows';
+  sheetBack=()=>{const b=document.querySelector(rows+' .claim.current .cardbtn')||document.querySelector(rows+' .cardbtn'); if(b) b.focus()};
+  el.classList.add('sheet'); el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); el.setAttribute('aria-labelledby',el.id+'Title');
+  el.scrollTop=0; document.body.classList.add('sheet-open');
+  requestAnimationFrame(()=>{const b=el.querySelector('.back'); if(b) b.focus({preventScroll:true})});
+}
+function closeSheet(restore){
+  let was=false;
+  document.querySelectorAll('.why.sheet').forEach(e=>{was=true; e.classList.remove('sheet'); e.removeAttribute('role'); e.removeAttribute('aria-modal'); e.removeAttribute('aria-labelledby')});
+  document.body.classList.remove('sheet-open');
+  if(was&&restore!==false&&sheetBack) sheetBack();
+  sheetBack=null;
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeMore(true); closeSheet(); return}
+  if(e.key!=='Tab') return;
+  const sh=document.querySelector('.why.sheet'); if(!sh) return;
+  const f=[...sh.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select,summary')].filter(x=>x.offsetParent!==null);
+  if(!f.length) return;
+  const first=f[0], last=f[f.length-1], a=document.activeElement;
+  if(e.shiftKey&&(a===first||!sh.contains(a))){e.preventDefault(); last.focus()}
+  else if(!e.shiftKey&&(a===last||!sh.contains(a))){e.preventDefault(); first.focus()}
+});
 
 /* ---------- batch ---------- */
 async function loadBatches(){
@@ -139,7 +167,7 @@ $('batchSel').addEventListener('change',e=>loadBatch(+e.target.value).catch(fail
 
 async function openQueue(){
   const none=!S.batches.length;
-  $('queueEmpty').hidden=!none; $('queueBody').hidden=none; $('batchSel').closest('.field').hidden=none;
+  $('queueEmpty').hidden=!none; $('queueBody').hidden=none; $('batchSel').closest('.field').hidden=S.batches.length<2;
   if(none){$('batchTitle').textContent='Antrean pemeriksaan'; $('databar').textContent=''; return}
   if(!S.batch||!S.batches.some(b=>b.id===S.batch.id)) await loadBatch(S.batches[0].id);
   else update();
@@ -147,7 +175,7 @@ async function openQueue(){
 async function loadBatch(id){
   const d=await api('GET','/api/batches/'+id);
   S.batch=d.batch; S.claims=d.claims; S.byId={}; S.claims.forEach(c=>{S.byId[c.id]=c});
-  S.thr=S.batch.thresholdPct; S.k=S.batch.topK; S.draft=null;
+  S.thr=S.batch.thresholdPct; S.k=S.batch.topK; S.draft=null; S.limit=PAGE; S.q=''; $('qSearch').value='';
   $('batchSel').value=id;
   $('kk').max=S.batch.maxTopK; $('kk').value=S.k; $('thr').value=S.thr;
   const N=S.claims.length;
@@ -191,6 +219,111 @@ function mark(st,cx,cy,k){
 }
 const icon=st=>`<svg class="mk" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${mark(st,8,8,.92)}</svg>`;
 
+/* ---------- bagian bersama dengan halaman Koding ---------- */
+const stripHtml=items=>items.map(k=>`<div class="stat"><b>${k[0]}</b><span>${k[1]}</span>${k[2]!=null?`<i class="meter" aria-hidden="true"><i style="width:${Math.round(k[2]*100)}%"></i></i>`:''}</div>`).join('');
+/* satu kartu = satu item daftar; tombol judul adalah pintu papan ketik */
+function cardHtml(o){
+  const p=o.pfx||'c';
+  return `<li class="claim st-${o.st}${o.rv?' done':''}${o.current?' current':''}" data-id="${o.id}">
+    <span class="cmark" aria-hidden="true">${icon(o.st)}</span>
+    <div class="cbody"><div class="ctop"><h3 class="ctitle"><button type="button" class="cardbtn"${o.why?` aria-describedby="${p}w${o.id}"`:''}${o.current?' aria-current="true"':''}>${o.title}<span class="sr">, SEP ${esc(o.sep)}${o.rv?', '+esc(o.rv):''}</span></button></h3>${o.rv?`<span class="rv" aria-hidden="true">${esc(o.rv)}</span>`:''}</div>
+    <p class="cmeta">${o.meta}</p>${o.why?`<p class="cwhy" id="${p}w${o.id}">${o.why}</p>`:''}</div></li>`;
+}
+/* panah atas/bawah memindahkan fokus antar kartu */
+function listKeys(ul){
+  ul.addEventListener('keydown',e=>{
+    if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key)||!e.target.classList.contains('cardbtn')) return;
+    const b=[...ul.querySelectorAll('.cardbtn')], i=b.indexOf(e.target); let n=i;
+    if(e.key==='ArrowDown') n=Math.min(b.length-1,i+1); else if(e.key==='ArrowUp') n=Math.max(0,i-1); else if(e.key==='Home') n=0; else n=b.length-1;
+    e.preventDefault(); b[n].focus(); b[n].closest('.claim').scrollIntoView({block:'nearest'});
+  });
+}
+/* klaim berikutnya yang belum diperiksa setelah klaim ini, memutar ke awal daftar */
+function nextAfter(list,cur){
+  const i=list.indexOf(cur), rot=i<0?list:list.slice(i+1).concat(list.slice(0,i));
+  return rot.find(c=>c!==cur&&c.st!=='clear'&&!c.review)||null;
+}
+/* gambar ulang panel tanpa kehilangan fokus (mis. saat rincian selesai dimuat) */
+function setPanel(el,html){
+  const a=document.activeElement, mine=a&&el.contains(a);
+  const id=mine?a.id:'', sel=mine&&a.selectionStart!=null?[a.selectionStart,a.selectionEnd]:null, back=mine&&a.classList&&a.classList.contains('back'), head=mine&&a.classList&&a.classList.contains('vhead');
+  el.innerHTML=html;
+  const n=id?document.getElementById(id):(back?el.querySelector('.back'):head?el.querySelector('.vhead'):null);
+  if(n){n.focus({preventScroll:true}); if(sel&&n.setSelectionRange){try{n.setSelectionRange(sel[0],sel[1])}catch(_){}}}
+}
+function focusDetail(el){const v=el.querySelector('.vhead'); el.scrollTop=0; if(v) v.focus()}
+/* panel rincian: ringkasan putusan, alasan, keputusan; perhitungan dilipat */
+function detailHtml(o){
+  const f=o.ids, rv=o.rv, d=o.draft;
+  const opt=x=>`<label class="opt"><input type="radio" name="${f.radio}" value="${x[0]}"${d.status===x[0]?' checked':''}><span class="t">${x[1]}<span class="s">${x[2]}</span></span></label>`;
+  const showResp=d.status==='docs_requested'||!!d.resp;
+  return `<header><button type="button" class="back" data-act="close" aria-label="Tutup rincian, kembali ke antrean"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Antrean</button><h2 id="${o.panelId}Title">Klaim terpilih</h2>${o.tag||''}</header>
+  <div class="body">
+    <div class="vhead st-${o.st}" tabindex="-1" role="group" aria-label="Klaim ${esc(o.sep)}, ${o.status}">
+      <div class="idline"><span class="num">${esc(o.sep)}</span><span class="pill ${o.st}">${icon(o.st)}${o.status}</span></div>
+      <p class="verdict">${o.verdict}</p>
+      <p class="herometa">${o.hero}</p>
+    </div>
+    <section class="sect"><h3>${o.reasonsTitle}</h3>
+      <ul class="reasons">${o.reasons.map(r=>`<li>${r}</li>`).join('')}</ul>
+      ${o.next?`<p class="next"><b>Langkah berikut.</b> ${o.next}</p>`:''}
+    </section>
+    <form class="review" id="${f.form}">
+      <h3>Keputusan verifikator</h3>
+      ${rv?`<p class="decided"><b>${esc(o.labels[rv.status])}</b> oleh ${esc(rv.by)}, ${esc(when(rv.at))}</p>`:''}
+      <fieldset class="opts"><legend class="sr">Keputusan</legend>${o.opts.map(opt).join('')}</fieldset>
+      <label for="${f.note}">Catatan</label>
+      <textarea id="${f.note}" maxlength="1000" placeholder="${esc(o.notePh)}">${esc(d.note)}</textarea>
+      <div class="resp${showResp?' show':''}"><label for="${f.resp}">Tanggapan rumah sakit</label>
+        <textarea id="${f.resp}" maxlength="1000" placeholder="${esc(o.respPh)}">${esc(d.resp)}</textarea></div>
+      <div class="btnrow">
+        <button type="submit" class="btn" value="next">Simpan dan lanjut</button>
+        <button type="submit" class="btn ghost" value="stay">Simpan saja</button>
+        ${rv?`<button type="button" class="btn ghost" id="${f.reopen}">Buka ulang</button>`:''}
+      </div>
+    </form>
+    <details class="fold flat"${o.open?' open':''}><summary><span class="t">Perhitungan dan data klaim</span></summary><div class="foldbody">
+      <dl class="facts">${o.facts.map(x=>`<div><dt>${x[0]}</dt><dd${x[2]?` class="${x[2]}"`:''}>${x[1]}</dd></div>`).join('')}</dl>
+      ${o.stages.map(x=>`<div class="stage"><h3>${x[0]}</h3>${x[1]}</div>`).join('')}
+    </div></details>
+  </div>`;
+}
+/* kolom tanggapan RS hanya tampil bila dokumen diminta atau sudah terisi */
+function syncResp(form){
+  const r=form.querySelector('.resp'); if(!r) return;
+  const st=form.querySelector('input[type=radio]:checked'), ta=r.querySelector('textarea');
+  r.classList.toggle('show',!!((st&&st.value==='docs_requested')||ta.value));
+}
+/* tab: satu tampilan per layar, dengan peran dan hubungan ARIA lengkap */
+function bindTabs(tabs,body,onChange){
+  const btns=()=>[...tabs.querySelectorAll('button[data-tab]')];
+  const panels=()=>[...body.querySelectorAll(':scope > [data-tabpanel]')];
+  btns().forEach(b=>{if(!b.id) b.id=tabs.id+'-'+b.dataset.tab});
+  const idOf=n=>btns().find(b=>b.dataset.tab===n).id;
+  btns().forEach(b=>b.setAttribute('aria-controls',tabs.id+'-p-'+b.dataset.tab));
+  panels().forEach(p=>{p.id=tabs.id+'-p-'+p.dataset.tabpanel; p.setAttribute('aria-labelledby',idOf(p.dataset.tabpanel))});
+  function set(name,focus){
+    btns().forEach(b=>{const on=b.dataset.tab===name; b.setAttribute('aria-selected',String(on)); b.tabIndex=on?0:-1; if(on&&focus) b.focus()});
+    panels().forEach(p=>{p.hidden=p.dataset.tabpanel!==name});
+    if(onChange) onChange(name);
+  }
+  tabs.addEventListener('click',e=>{const b=e.target.closest('button[data-tab]'); if(b) set(b.dataset.tab)});
+  tabs.addEventListener('keydown',e=>{
+    const l=btns().filter(b=>!b.hidden), i=l.findIndex(b=>b.getAttribute('aria-selected')==='true'); let n=-1;
+    if(e.key==='ArrowRight') n=(i+1)%l.length; else if(e.key==='ArrowLeft') n=(i-1+l.length)%l.length; else if(e.key==='Home') n=0; else if(e.key==='End') n=l.length-1;
+    if(n>=0){e.preventDefault(); set(l[n].dataset.tab,true)}
+  });
+  body.addEventListener('click',e=>{const g=e.target.closest('[data-goto-tab]'); if(g){e.preventDefault(); set(g.dataset.gotoTab); window.scrollTo({top:0,behavior:'smooth'})}});
+  set(btns()[0].dataset.tab);
+  return {set};
+}
+/* tabel yang bisa digeser mendapat nama dan fokus papan ketik */
+document.querySelectorAll('.tblwrap').forEach((el,i)=>{
+  const sec=el.closest('section'), h=sec&&sec.querySelector('h1,h2');
+  if(h){if(!h.id) h.id='tw'+i; el.setAttribute('aria-labelledby',h.id)} else el.setAttribute('aria-label','Tabel');
+  el.setAttribute('role','group'); el.tabIndex=0;
+});
+
 function topDriver(c){if(!c.phi)return -1;let b=0;for(let i=1;i<c.phi.length;i++)if(c.phi[i]>c.phi[b])b=i;return b}
 function featText(c,i){
   if(i===0) return times(c.cover)+' acuan';
@@ -203,12 +336,13 @@ function featText(c,i){
 function renderHead(){
   const b=S.batch,N=S.claims.length;
   $('batchTitle').textContent=b.name;
-  const parts=[`<span>Diunggah oleh <b>${esc(b.uploadedBy)}</b>, ${esc(when(b.uploadedAt))}</span>`,`<span>${dots(b.rowsTotal)} baris dibaca</span>`,`<span>${dots(N)} disaring</span>`];
-  if(b.noTopup) parts.push(`<span>${dots(b.noTopup)} tanpa top-up obat atau alkes, dilewati</span>`);
-  if(b.noRef) parts.push(`<span>${dots(b.noRef)} dengan top-up tanpa harga acuan, dilewati</span>`);
-  if(b.bad) parts.push(`<span>${dots(b.bad)} tidak terbaca, dilewati</span>`);
-  if(b.truncated) parts.push(`<span>hanya ${dots(N)} klaim top-up pertama yang disaring</span>`);
-  $('databar').innerHTML=parts.join('');
+  $('databar').innerHTML=`<span><b>${dots(N)}</b> klaim ber-top-up disaring dari ${dots(b.rowsTotal)} baris</span><span>diunggah oleh ${esc(b.uploadedBy)}, ${esc(when(b.uploadedAt))}</span>`;
+  const skip=[];
+  if(b.noTopup) skip.push(`${dots(b.noTopup)} baris tanpa top-up obat atau alkes`);
+  if(b.noRef) skip.push(`${dots(b.noRef)} baris dengan top-up tanpa harga acuan`);
+  if(b.bad) skip.push(`${dots(b.bad)} baris tidak terbaca atau ganda`);
+  if(b.truncated) skip.push(`hanya ${dots(N)} klaim top-up pertama yang disaring`);
+  const sn=$('skipNote'); sn.hidden=!skip.length; sn.textContent=skip.length?'Dilewati: '+skip.join('; ')+'.':'';
 }
 function renderPipe(n){
   $('pipe').innerHTML=[
@@ -218,20 +352,28 @@ function renderPipe(n){
     ['Tahap 4 · Alasan dan keputusan',`<span class="num">${n.flag}</span> di antrean`,`${n.reviewed} sudah diperiksa`]
   ].map(s=>`<li><span class="step">${s[0]}</span><span class="big">${s[1]}</span><span class="cap">${s[2]}</span></li>`).join('');
 }
+function renderBanner(){
+  const bn=$('dataBanner'); if(!S.batch){bn.hidden=true;return}
+  const bits=[]; if(S.batch.labelled) bits.push('data sintetis'); if(S.refPlaceholder) bits.push('harga acuan contoh');
+  bn.hidden=!bits.length;
+  if(bits.length){const t=bits.join(' dan '); bn.innerHTML=`${t.charAt(0).toUpperCase()+t.slice(1)}: hanya menunjukkan cara kerja, bukan kinerja pada klaim nyata. <button type="button" class="go" data-goto-tab="about" aria-label="Rincian cara kerja dan batasan, di tab Gambaran">Rincian</button>`}
+}
 function renderKpis(n){
   const N=S.claims.length, decided=n.confirmed+n.cleared;
-  const precision=decided?`presisi sejauh ini: <b>${Math.round(n.confirmed/decided*100)}%</b> (${n.confirmed} dari ${decided} yang diputuskan)`:'belum ada keputusan';
-  $('kpis').innerHTML=[
-    [`${n.pf}`,'klaim gagal aturan tagihan',`top-up diklaim: <span class="num">${rpShort(n.ruleValue)}</span>`],
-    [`+${n.modelOnly}`,'klaim hanya ditemukan lapisan anomali',`top-up diklaim: <span class="num">${rpShort(n.modelValue)}</span>`],
-    [`${n.flag}<small> dari ${dots(N)}</small>`,'klaim di antrean pemeriksaan',`beban kerja ${Math.round(n.flag/N*100)}% dari klaim yang disaring`],
-    [`${n.reviewed}<small> dari ${n.flag}</small>`,`diperiksa: ${n.confirmed} dikonfirmasi, ${n.cleared} wajar, ${n.docs} menunggu dokumen`,precision]
-  ].map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}<br>${k[2]}</div></div>`).join('');
+  $('kpis').innerHTML=stripHtml([
+    [`${n.flag}<small> dari ${dots(N)}</small>`,'klaim perlu diperiksa'],
+    [`${n.pf}`,'ditandai aturan tagihan'],
+    [`+${n.modelOnly}`,'hanya ditandai lapisan anomali'],
+    [`${n.reviewed}<small> dari ${n.flag}</small>`,'sudah diperiksa',n.flag?n.reviewed/n.flag:0]
+  ]);
+  const precision=decided?` Presisi sejauh ini: <b>${Math.round(n.confirmed/decided*100)}%</b> (${n.confirmed} dikonfirmasi dari ${decided} yang diputuskan).`:'';
+  $('valNote').innerHTML=`<b>Nilai top-up yang diklaim.</b> Klaim yang gagal aturan tagihan: ${rpShort(n.ruleValue)}. Klaim yang hanya ditemukan lapisan anomali: ${rpShort(n.modelValue)}. Antrean memuat ${Math.round(n.flag/N*100)}% dari klaim yang disaring. Sudah diperiksa: ${n.confirmed} dikonfirmasi, ${n.cleared} wajar, ${n.docs} menunggu dokumen.${precision}`;
   const note=$('labelNote'); note.hidden=!S.batch.labelled;
   if(S.batch.labelled){
     const rand=n.inj*n.flag/N;
     note.innerHTML=`<b>Data sintetis.</b> ${n.inj} klaim disisipi pola bermasalah. Dengan pengaturan ini, <b>${n.caught} dari ${n.inj}</b> masuk antrean (aturan tagihan saja: ${n.ruleCaught}), bersama ${n.extra} klaim wajar. Sampel acak dengan beban yang sama (${n.flag} klaim) rata-rata hanya memuat <b>${dec(rand,1)} dari ${n.inj}</b>. Nilai top-up klaim bermasalah di antrean: ${rpShort(n.caughtValue)} dari ${rpShort(n.injValue)}. Polanya lebih bersih daripada klaim nyata, jadi ini bukan perkiraan kinerja.`;
   }
+  renderBanner();
 }
 function renderLegend(n){
   $('legend').innerHTML=[['both',n.both],['rule',n.ruleOnly],['model',n.modelOnly],['clear',S.claims.length-n.flag]]
@@ -268,10 +410,12 @@ function renderUnsaved(){
   const b=S.batch, dirty=S.thr!==b.thresholdPct||S.k!==b.topK;
   $('unsaved').hidden=!dirty;
   if(dirty) $('unsavedText').textContent=`Anda sedang mencoba pengaturan lain. Pengaturan tersimpan untuk batch ini: ${b.thresholdPct}% dan ${b.topK} klaim.`+(S.user.role==='supervisor'||S.user.guest?'':' Hanya supervisor yang dapat menyimpan perubahan.');
+  $('ctlSum').textContent=`tagihan < ${S.thr}% · ${S.k} klaim anomali`+(dirty?' · belum disimpan':'');
 }
 function drawChart(){
-  if(S.route!=='queue'||!S.claims.length) return;
-  const box=$('chart'), W=Math.max(280,box.clientWidth-16), H=W<520?300:360, m={l:44,r:16,t:20,b:42};
+  const box=$('chart');
+  if(S.route!=='queue'||S.tab!=='about'||!S.claims.length||!box.clientWidth) return;
+  const W=Math.max(280,box.clientWidth-16), H=W<520?300:360, m={l:44,r:16,t:20,b:42};
   const x=v=>m.l+Math.min(v,X1)/X1*(W-m.l-m.r), y=s=>H-m.b-(Math.max(Y0,Math.min(Y1,s))-Y0)/(Y1-Y0)*(H-m.t-m.b);
   let g='';
   for(let t=Math.ceil(Y0*10)/10;t<=Y1+1e-9;t+=0.1){g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--rule)" stroke-width="1"/><text x="${m.l-8}" y="${y(t)+4}" text-anchor="end">${dec(t,1)}</text>`}
@@ -307,45 +451,62 @@ function drawChart(){
     tip.style.top=Math.max(4,c._cy+6-tip.offsetHeight-12)+'px';
   });
   box.addEventListener('mouseleave',()=>{tip.hidden=true});
-  box.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest('.hit'); if(t&&S.byId[t.dataset.id]) selectClaim(S.byId[t.dataset.id],true)});
+  box.addEventListener('click',e=>{const t=e.target.closest&&e.target.closest('.hit'); if(t&&S.byId[t.dataset.id]){tabs.set('queue'); window.scrollTo({top:0}); selectClaim(S.byId[t.dataset.id],true)}});
 })();
 
-const ROW_CAP=300;
-function renderRows(){
+const PAGE=20;
+function queueList(){
+  const q=S.q.trim().toLowerCase();
   let list=S.claims.filter(c=>S.view==='all'||(c.st!=='clear'&&(S.view==='flagged'||!c.review)));
-  list.sort((a,b)=>(a.st==='clear')-(b.st==='clear')||a.rank-b.rank);
-  const total=list.length; if(total>ROW_CAP) list=list.slice(0,ROW_CAP);
-  $('queueLede').textContent='Diurutkan menurut skor anomali. Pilih klaim untuk melihat alasannya dan mencatat keputusan.'+(total>ROW_CAP?` Menampilkan ${ROW_CAP} pertama dari ${dots(total)}.`:'');
+  if(q) list=list.filter(c=>`${c.sep} ${c.rs} ${c.item} ${c.final||c.code} ${c.cbg}`.toLowerCase().includes(q));
+  return list.sort((a,b)=>(a.st==='clear')-(b.st==='clear')||a.rank-b.rank);
+}
+function renderSeg(){
+  const n=S.cnt; if(!n) return;
+  const t={flagged:['Di antrean',n.flag],todo:['Belum diperiksa',n.flag-n.reviewed],all:['Semua klaim',S.claims.length]};
+  document.querySelectorAll('#view-queue .seg button[data-view]').forEach(b=>{const x=t[b.dataset.view]; b.innerHTML=`${x[0]}<span class="cnt">${dots(x[1])}</span>`; b.setAttribute('aria-pressed',String(b.dataset.view===S.view))});
+}
+function renderRows(){
+  let list=queueList();
+  const total=list.length; if(total>S.limit) list=list.slice(0,S.limit);
+  renderSeg();
+  const q=S.q.trim();
+  $('queueLede').textContent=total?`${dots(total)} klaim${q?` cocok dengan “${q}”`:''}, diurutkan menurut skor anomali. Pilih satu untuk melihat alasannya.`:'';
+  $('qMoreRow').hidden=total<=S.limit; $('qMore').textContent=`Tampilkan ${Math.min(PAGE,total-S.limit)} lagi (sisa ${dots(total-S.limit)})`;
   $('rows').innerHTML=list.map(c=>{
     const d=c.mf?topDriver(c):-1;
-    const why=c.mf&&d>=0?`${DRIVER[d]}: ${esc(featText(c,d))}`:c.pf?`Tagihan RS: ${times(c.cover)} acuan`:'';
-    const w=Math.max(4,Math.min(100,(c.score-Y0)/(Y1-Y0)*100));
-    const rv=c.review?`<span class="rv done">${REVIEW[c.review.status]}</span>`:(c.st!=='clear'?'<span class="rv">Belum diperiksa</span>':'');
-    return `<article class="claim st-${c.st}" role="listitem" data-id="${c.id}"${S.sel===c?' aria-current="true"':''}>
-      <div class="chips"><span class="chip">Skor <b class="num">${sc(c.score)}</b></span><span class="chip"><b class="num">${times(c.cover)}</b> acuan</span><span class="chip">RS ${esc(c.rs)}</span></div>
-      <h3 class="ctitle">${esc(c.item)}</h3>
-      <p class="cdesc"><button type="button" class="idb">${esc(c.sep)}</button><span><span class="num">${esc(c.final||c.code)}</span> · ${esc(c.cbg)} · pulang ${esc(c.disTxt||c.admTxt)}</span></p>
-      <div class="cfoot"><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span>${rv}</div>
-      ${why?`<p class="cwhy">${why}</p>`:''}
-      <span class="sbar${c.mf?' on':''}"><i style="width:${w.toFixed(0)}%"></i></span></article>`;
-  }).join('')||`<p class="noclaims">${S.view==='todo'?'Semua klaim di antrean sudah diperiksa.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan ambang tagihan atau kapasitas.'}</p>`;
+    const reason=d>=0?`${DRIVER[d]}: ${featText(c,d)}`:c.pf?`Tagihan RS: ${times(c.cover)} acuan`:'';
+    return cardHtml({id:c.id,pfx:'c',sep:c.sep,st:c.st,current:S.sel===c,rv:c.review?REVIEW[c.review.status]:'',
+      title:esc(c.item),
+      meta:`<span class="num sepn">${esc(c.sep)}</span><span class="msub">RS ${esc(c.rs)} · pulang ${esc(c.disTxt||c.admTxt)}</span>`,
+      why:`<b>${STATUS[c.st]}</b>${reason?' · '+esc(reason):''}`});
+  }).join('')||`<li class="noclaims">${q?`Tidak ada klaim yang cocok dengan “${esc(q)}”. Hapus pencarian untuk melihat semua.`:S.view==='todo'?'Semua klaim di antrean sudah diperiksa. Ekspor CSV untuk melaporkan hasilnya.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan ambang tagihan atau kapasitas verifikator.'}</li>`;
   $('exportCsv').href=`/api/batches/${S.batch.id}/export.csv?view=${S.view==='all'?'all':'flagged'}&thr=${S.thr}&k=${S.k}`;
 }
-$('rows').addEventListener('click',e=>{const el=e.target.closest('.claim[data-id]'); if(el&&S.byId[el.dataset.id]) selectClaim(S.byId[el.dataset.id],true)});
+listKeys($('rows'));
+$('qSearch').addEventListener('input',e=>{S.q=e.target.value; S.limit=PAGE; renderRows()});
+$('rows').addEventListener('click',e=>{const el=e.target.closest('.claim[data-id]'); if(el&&S.byId[el.dataset.id]) selectClaim(S.byId[el.dataset.id],true,e.detail===0)});
+$('qMore').addEventListener('click',()=>{S.limit+=PAGE; renderRows()});
 function setView(v,quiet){
-  S.view=v;
-  document.querySelectorAll('.seg button[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===v));
+  S.view=v; S.limit=PAGE;
+  document.querySelectorAll('#view-queue .seg button[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===v));
   if(!quiet) renderRows();
 }
-document.querySelector('.seg').addEventListener('click',e=>{const b=e.target.closest('button[data-view]'); if(b) setView(b.dataset.view)});
+document.querySelector('#view-queue .seg').addEventListener('click',e=>{const b=e.target.closest('button[data-view]'); if(b) setView(b.dataset.view)});
+const tabs=bindTabs($('tabs'),$('queueBody'),name=>{S.tab=name; if(name==='about') drawChart(); if(name==='bias') tick('rs')});
 
 /* ---------- klaim terpilih ---------- */
-async function selectClaim(c,user){
+async function selectClaim(c,user,focus){
   if(!c) return;
   S.sel=c; S.draft=null;
   if(user){tick('reasons'); if(c.rank===2&&S.batch.labelled) tick('example')}
+  if(focus){const i=queueList().indexOf(c); if(i>=S.limit) S.limit=Math.ceil((i+1)/PAGE)*PAGE}
   drawChart(); renderRows(); renderWhy();
   if(user) openSheet();
+  if(focus&&!(user&&MOBILE.matches)){
+    const card=document.querySelector(`#rows .claim[data-id="${c.id}"]`); if(card) card.scrollIntoView({block:'nearest'});
+    requestAnimationFrame(()=>focusDetail($('why')));
+  }
   if(c.full) return;
   try{
     const d=await api('GET','/api/claims/'+c.id);
@@ -378,7 +539,7 @@ function reasonsFor(c){
   return {reasons,next};
 }
 function renderWhy(){
-  const c=S.sel; if(!c){$('why').innerHTML='';return}
+  const c=S.sel; if(!c){$('why').innerHTML='<div class="empty-detail"><p>Pilih klaim di daftar untuk melihat alasannya dan mencatat keputusan.</p></div>';return}
   const phi=c.phi, base=S.batch.baseScore, N=S.claims.length;
   const verdict={both:'Ditandai aturan tagihan dan lapisan anomali',rule:'Ditandai aturan tagihan saja',model:'Ditandai lapisan anomali saja',clear:'Tidak masuk antrean dengan pengaturan ini'}[c.st];
   const s2=c.pf
@@ -396,67 +557,48 @@ function renderWhy(){
   }
   const {reasons,next}=reasonsFor(c);
   const rv=c.review, draft=S.draft&&S.draft.id===c.id?S.draft:{status:rv?rv.status:'',note:rv?rv.note:'',resp:rv?rv.rsResponse||'':''};
-  const opt=(v,t,sub)=>`<label class="opt"><input type="radio" name="status" value="${v}"${draft.status===v?' checked':''}><span class="t">${t}<span class="s">${sub}</span></span></label>`;
-  const tag=S.batch.labelled?`<span class="tag">Label sintetis: ${c.label?LABELS[c.label]||esc(c.label):'klaim biasa'}</span>`:'';
-  $('why').innerHTML=`<header><button type="button" class="back" data-act="close" aria-label="Kembali ke antrean"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Antrean</button><h2>Klaim terpilih</h2>${tag}</header>
-  <div class="body">
-    <div class="vhead st-${c.st}">
-      <div class="idline"><span class="num">${esc(c.sep)}</span><span class="pill ${c.st}">${icon(c.st)}${STATUS[c.st]}</span></div>
-      <p class="verdict">${verdict}</p>
-      <p class="herometa">${esc(c.item)} · <span class="num">${esc(c.final||c.code)}</span></p>
-    </div>
-    <form class="review" id="reviewForm">
-      <h3>Keputusan verifikator</h3>
-      <p class="decided">${rv?`<b>${REVIEW[rv.status]}</b> oleh ${esc(rv.by)}, ${esc(when(rv.at))}`:'Belum ada keputusan.'}</p>
-      <fieldset class="opts"><legend class="sr">Keputusan</legend>
-        ${opt('confirmed','Temuan dikonfirmasi','top-up tidak didukung')}
-        ${opt('cleared','Dinyatakan wajar','klaim sesuai')}
-        ${opt('docs_requested','Dokumen diminta','menunggu jawaban rumah sakit')}
-      </fieldset>
-      <label for="reviewNote">Catatan</label>
-      <textarea id="reviewNote" maxlength="1000" placeholder="Apa yang diperiksa, dan apa yang ditemukan">${esc(draft.note)}</textarea>
-      <label for="rsResponse">Tanggapan rumah sakit <span class="s">(bila dokumen diminta)</span></label>
-      <textarea id="rsResponse" maxlength="1000" placeholder="Dokumen yang dikirim RS dan penjelasannya, misalnya faktur implan no. ...">${esc(draft.resp)}</textarea>
-      <div class="btnrow">
-        <button type="submit" class="btn">Simpan keputusan</button>
-        ${rv?'<button type="button" class="btn ghost" id="reopen">Buka ulang</button>':''}
-      </div>
-    </form>
-    <dl class="facts">
-      <div><dt>Rumah sakit</dt><dd>${esc(c.rs)} · Kelas ${esc(c.kelasRs||'?')} · ${esc(c.kodeTarif)}</dd></div>
-      <div><dt>Masuk – pulang</dt><dd>${esc(c.admTxt)} – ${esc(c.disTxt)} · LOS ${c.los}</dd></div>
-      <div><dt>INA-CBG</dt><dd><span class="num">${esc(c.cbg)}</span> ${esc(c.cbgDesc||'')}</dd></div>
-      <div><dt>Top-up · ${esc(KIND[c.kind]||c.kind)}</dt><dd><span class="num">${esc(c.final||c.code)}</span> ${esc(c.item)}</dd></div>
-      <div><dt>Diagnosa · prosedur</dt><dd class="num">${esc(c.diag||'-')} · ${esc(c.proc||'-')}</dd></div>
-      <div><dt>Token kartu</dt><dd class="num">${esc(c.token||'-')}</dd></div>
-      <div><dt>TARIF_RS</dt><dd class="num">${rp(c.tarifRs)}</dd></div>
-      <div><dt>Top-up${c.total?' · total tarif':''}</dt><dd class="num">${rp(c.topup)}${c.total?' · '+rp(c.total):''}</dd></div>
-    </dl>
-    <div class="stage"><h3>Tahap 2 · Aturan tagihan</h3><p>${s2}</p></div>
-    <div class="stage"><h3>Tahap 3 · Lapisan anomali</h3><p>${s3}</p></div>
-    <div class="stage"><h3>Tahap 4 · Apa yang menaikkan skor</h3>${bars}</div>
-    <div class="stage"><h3>Untuk verifikator</h3>
-      <ul class="reasons">${reasons.map(r=>`<li>${r}</li>`).join('')}</ul>
-      ${next?`<p><b>Langkah berikut.</b> ${next}</p>`:''}
-    </div>
-  </div>`;
+  setPanel($('why'),detailHtml({
+    panelId:'why',
+    ids:{form:'reviewForm',note:'reviewNote',resp:'rsResponse',reopen:'reopen',radio:'status'},
+    tag:S.batch.labelled?`<span class="tag">Label sintetis · ${c.label?LABELS[c.label]||esc(c.label):'klaim biasa'}</span>`:'',
+    st:c.st, status:STATUS[c.st], sep:c.sep, verdict, hero:`${esc(c.item)} · <span class="num">${esc(c.final||c.code)}</span>`,
+    reasonsTitle:c.st==='clear'?'Penjelasan':'Mengapa ditandai', reasons, next,
+    rv, draft, labels:REVIEW,
+    opts:[['confirmed','Temuan dikonfirmasi','top-up tidak didukung'],['cleared','Dinyatakan wajar','klaim sesuai'],['docs_requested','Dokumen diminta','menunggu jawaban rumah sakit']],
+    notePh:'Apa yang diperiksa, dan apa yang ditemukan', respPh:'Dokumen yang dikirim RS dan penjelasannya, misalnya faktur implan no. ...',
+    facts:[
+      ['Rumah sakit',`${esc(c.rs)} · Kelas ${esc(c.kelasRs||'?')} · ${esc(c.kodeTarif)}`],
+      ['Masuk – pulang',`${esc(c.admTxt)} – ${esc(c.disTxt)} · LOS ${c.los}`],
+      ['INA-CBG',`<span class="num">${esc(c.cbg)}</span> ${esc(c.cbgDesc||'')}`],
+      ['Top-up · '+esc(KIND[c.kind]||c.kind),`<span class="num">${esc(c.final||c.code)}</span> ${esc(c.item)}`],
+      ['Diagnosa · prosedur',`${esc(c.diag||'-')} · ${esc(c.proc||'-')}`,'num'],
+      ['Token kartu',esc(c.token||'-'),'num'],
+      ['TARIF_RS',rp(c.tarifRs),'num'],
+      ['Top-up'+(c.total?' · total tarif':''),rp(c.topup)+(c.total?' · '+rp(c.total):''),'num']
+    ],
+    stages:[['Tahap 2 · Aturan tagihan',`<p>${s2}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s3}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]],
+    open:S.foldOpen}));
 }
 /* formulir digambar ulang bersama panel, jadi dengarkan pada panel */
 $('why').addEventListener('input',e=>{
   const f=e.target.closest('#reviewForm'); if(!f||!S.sel) return;
   const st=f.querySelector('input[name=status]:checked');
   S.draft={id:S.sel.id,status:st?st.value:'',note:$('reviewNote').value,resp:$('rsResponse').value};
+  syncResp(f);
 });
-async function saveReview(status,note,resp){
+$('why').addEventListener('toggle',e=>{if(e.target.classList&&e.target.classList.contains('fold')) S.foldOpen=e.target.open},true);
+async function saveReview(status,note,resp,go){
   const c=S.sel;
   try{
     const d=await api('PUT','/api/claims/'+c.id+'/review',{status,note,rsResponse:resp||''});
     Object.assign(c,d,{full:true}); S.draft=null;
     const b=S.batches.find(x=>x.id===S.batch.id); if(b) b.stale=true;
     update();
-    toast(status?'Keputusan tersimpan: '+REVIEW[status]+'.':'Klaim dibuka ulang.');
-    if(status) closeSheet();
-    if(status) tick('decide');
+    if(!status){toast('Klaim dibuka ulang.'); return}
+    tick('decide');
+    const next=go?nextAfter(queueList(),c):null;
+    if(next){toast(`Keputusan tersimpan: ${REVIEW[status]}. Klaim berikutnya dibuka.`); selectClaim(next,false,true)}
+    else{toast(go?`Keputusan tersimpan: ${REVIEW[status]}. Tidak ada klaim lain yang menunggu.`:`Keputusan tersimpan: ${REVIEW[status]}.`); closeSheet(); if(!MOBILE.matches) focusDetail($('why'))}
   }catch(e){fail(e)}
 }
 $('why').addEventListener('submit',e=>{
@@ -464,13 +606,13 @@ $('why').addEventListener('submit',e=>{
   e.preventDefault();
   const st=e.target.querySelector('input[name=status]:checked');
   if(!st){toast('Pilih keputusan terlebih dahulu.',true);return}
-  saveReview(st.value,$('reviewNote').value,$('rsResponse').value);
+  saveReview(st.value,$('reviewNote').value,$('rsResponse').value,!!(e.submitter&&e.submitter.value==='next'));
 });
 $('why').addEventListener('click',e=>{if(e.target.id==='reopen') saveReview(null,'',''); if(e.target.closest('[data-act=close]')) closeSheet()});
 
 function update(){
   if(!S.batch) return;
-  classify(); const n=counts();
+  classify(); const n=counts(); S.cnt=n;
   $('thrOut').textContent=S.thr+'%'; $('kOut').textContent=S.k;
   renderHead(); renderPipe(n); renderKpis(n); renderLegend(n); renderUnsaved(); drawChart(); renderRows(); renderWhy(); renderRs(); renderCodes(); renderTour();
 }
@@ -485,40 +627,83 @@ $('saveSettings').addEventListener('click',async()=>{
 });
 let rz; window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(()=>{drawChart();drawRobust()},120)});
 
-/* ---------- halaman batch ---------- */
+/* ---------- halaman berkas (top-up dan koding) ---------- */
+const SAMPLE={topup:'/assets/sample/veriklaim-sample-eklaim.txt',coding:'/assets/sample/veriklaim-sample-koding.txt'};
+let UP_KIND='topup';
+function upWarnText(kind){
+  if(!(S.user&&S.user.guest)) return UP_WARN;
+  return `Unggah hanya berkas uji sintetis; jangan unggah data peserta JKN riil. Satu berkas diperiksa paling banyak ${dots(S.config.maxClaims)} klaim${kind==='topup'?' ber-top-up':''}. Server tidak membaca nama pasien, nomor RM, atau tanggal lahir; ${kind==='topup'?'nomor kartu disimpan hanya sebagai token satu arah':'nomor kartu tidak dibaca'}; berkas mentah tidak disimpan.`;
+}
+function setKind(k){
+  UP_KIND=k;
+  document.querySelectorAll('#upKind button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===k)));
+  $('upSample').href=SAMPLE[k]; $('upHint').hidden=k!=='coding'; $('upMsg').textContent='';
+  $('upBtn').textContent=k==='coding'?'Unggah dan periksa':'Unggah dan saring';
+  $('upWarn').textContent=upWarnText(k);
+}
+$('upKind').addEventListener('click',e=>{const b=e.target.closest('button[data-kind]'); if(b) setKind(b.dataset.kind)});
 async function openBatches(){
   await loadBatches();
+  const coding=await api('GET','/api/coding/batches');
+  setKind(UP_KIND);
   const sup=S.user.role==='supervisor'||!!S.user.guest;
-  $('batchRows').innerHTML=S.batches.map(b=>{
-    const skipped=[b.noTopup?`${dots(b.noTopup)} tanpa top-up`:'',b.noRef?`${dots(b.noRef)} tanpa harga acuan`:'',b.bad?`${dots(b.bad)} tidak terbaca`:''].filter(Boolean).join(', ');
+  const tag=t=>`<span class="tag kind">${t}</span>`;
+  const rows=S.batches.map(b=>({kind:'topup',b})).concat(coding.map(b=>({kind:'coding',b}))).sort((x,y)=>String(y.b.uploadedAt).localeCompare(String(x.b.uploadedAt)));
+  $('batchRows').innerHTML=rows.map(({kind,b})=>{
+    const btn=`<button type="button" class="btn small" data-open="${b.id}" data-kind="${kind}" aria-label="Buka berkas ${esc(b.name)}">Buka</button>${sup?` <button type="button" class="btn small danger" data-del="${b.id}" data-kind="${kind}" aria-label="Hapus berkas ${esc(b.name)}">Hapus</button>`:''}`;
+    const who=`${esc(when(b.uploadedAt))}<span class="sm">oleh ${esc(b.uploadedBy)}</span>`;
+    if(kind==='coding'){
+      return `<tr>
+      <td><b>${esc(b.name)}</b> ${tag('Koding')}<span class="sm">${esc(b.filename)}${b.labelled?' · sampel sintetis':''}</span></td>
+      <td>${who}</td>
+      <td><span class="num">${dots(b.rowsRead)}</span> klaim dari ${b.hospitalsN} RS<span class="sm">${dots(b.compared)} klaim II/III dibandingkan${b.bad?`; ${dots(b.bad)} tidak terbaca atau ganda`:''}</span></td>
+      <td><span class="num">${b.queued}</span> di antrean<span class="sm">${b.reviewed} diperiksa · ${b.topK} teratas</span></td>
+      <td class="act">${btn}</td></tr>`;
+    }
+    const skipped=[b.noTopup?`${dots(b.noTopup)} tanpa top-up`:'',b.noRef?`${dots(b.noRef)} tanpa harga acuan`:'',b.bad?`${dots(b.bad)} tidak terbaca atau ganda`:''].filter(Boolean).join(', ');
     return `<tr>
-      <td><b>${esc(b.name)}</b><span class="sm">${esc(b.filename)}${b.labelled?' · sampel sintetis':''}</span></td>
-      <td>${esc(when(b.uploadedAt))}<span class="sm">oleh ${esc(b.uploadedBy)}</span></td>
+      <td><b>${esc(b.name)}</b> ${tag('Top-up')}<span class="sm">${esc(b.filename)}${b.labelled?' · sampel sintetis':''}</span></td>
+      <td>${who}</td>
       <td><span class="num">${dots(b.rowsScreened)}</span> disaring dari <span class="num">${dots(b.rowsTotal)}</span>${skipped?`<span class="sm">dilewati: ${skipped}</span>`:''}</td>
       <td><span class="num">${b.flagged}</span> di antrean<span class="sm">${b.reviewed} diperiksa · tagihan &lt; ${b.thresholdPct}%, ${b.topK} teratas</span></td>
-      <td class="act"><button type="button" class="btn small" data-open="${b.id}">Buka</button>${sup?` <button type="button" class="btn small danger" data-del="${b.id}">Hapus</button>`:''}</td></tr>`;
+      <td class="act">${btn}</td></tr>`;
   }).join('')||'<tr><td colspan="5">Belum ada batch. Unggah berkas TXT E-Klaim untuk membuat yang pertama.</td></tr>';
 }
 $('batchRows').addEventListener('click',async e=>{
   const o=e.target.closest('[data-open]'), d=e.target.closest('[data-del]');
-  if(o){S.batch=null; await loadBatch(+o.dataset.open).catch(fail); location.hash='#/queue'; return}
+  if(o){
+    if(o.dataset.kind==='coding'){window.VKCoding.focus(+o.dataset.open); location.hash='#/coding'; return}
+    S.batch=null; await loadBatch(+o.dataset.open).catch(fail); location.hash='#/queue'; return;
+  }
   if(d){
-    const b=S.batches.find(x=>x.id===+d.dataset.del);
+    const id=+d.dataset.del, coding=d.dataset.kind==='coding';
+    const b=(coding?await api('GET','/api/coding/batches').catch(()=>[]):S.batches).find(x=>x.id===id);
     if(!b||!window.confirm(`Hapus "${b.name}" beserta ${b.reviewed} keputusan yang tercatat? Tindakan ini tidak bisa dibatalkan.`)) return;
-    try{await api('DELETE','/api/batches/'+b.id); if(S.batch&&S.batch.id===b.id){S.batch=null;S.claims=[];S.sel=null} toast('Batch dihapus.'); await openBatches()}catch(err){fail(err)}
+    try{
+      await api('DELETE',(coding?'/api/coding/batches/':'/api/batches/')+id);
+      if(coding) window.VKCoding.forget(id);
+      else if(S.batch&&S.batch.id===id){S.batch=null;S.claims=[];S.sel=null}
+      toast('Batch dihapus.'); await openBatches();
+    }catch(err){fail(err)}
   }
 });
 $('uploadForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  const f=$('upFile').files[0], msg=$('upMsg'), btn=$('upBtn');
+  const f=$('upFile').files[0], msg=$('upMsg'), btn=$('upBtn'), coding=UP_KIND==='coding';
   if(!f){msg.textContent='Pilih berkas terlebih dahulu.';return}
   if(S.config&&f.size>S.config.maxUploadMb*1024*1024){msg.textContent=`Berkas lebih besar dari ${S.config.maxUploadMb} MB, batas untuk prototype ini.`;return}
   const fd=new FormData(); fd.append('file',f); fd.append('name',$('upName').value);
-  btn.disabled=true; msg.textContent='Mengunggah dan menyaring. Ini bisa memakan beberapa detik.';
+  btn.disabled=true; msg.textContent=coding?'Mengunggah dan memeriksa. Ini bisa memakan beberapa detik.':'Mengunggah dan menyaring. Ini bisa memakan beberapa detik.';
   try{
-    const b=await api('POST','/api/batches',fd);
-    e.target.reset(); msg.textContent=`${dots(b.rowsScreened)} dari ${dots(b.rowsTotal)} baris disaring. ${b.flagged} klaim masuk antrean.`;
-    tick('upload'); S.batch=null; await loadBatches(); await loadBatch(b.id); location.hash='#/queue';
+    const b=await api('POST',coding?'/api/coding/batches':'/api/batches',fd);
+    e.target.reset(); tick('upload');
+    if(coding){
+      msg.textContent=`${dots(b.rowsRead)} klaim dibaca, ${dots(b.compared)} klaim II/III dibandingkan. ${b.queued} masuk antrean.`;
+      window.VKCoding.focus(b.id); location.hash='#/coding';
+    }else{
+      msg.textContent=`${dots(b.rowsScreened)} dari ${dots(b.rowsTotal)} baris disaring. ${b.flagged} klaim masuk antrean.`;
+      S.batch=null; await loadBatches(); await loadBatch(b.id); location.hash='#/queue';
+    }
   }catch(err){if(!err.auth) msg.textContent=err.message+' Tidak ada yang disimpan.'}
   finally{btn.disabled=false}
 });
@@ -526,10 +711,10 @@ $('uploadForm').addEventListener('submit',async e=>{
 /* ---------- harga acuan ---------- */
 function setRefNote(list){
   S.refPlaceholder=list.some(r=>/^(placeholder|contoh)/i.test(r.source||''));
-  $('refNote').hidden=!S.refPlaceholder;
+  $('refNote').hidden=!S.refPlaceholder; renderBanner();
 }
 async function refreshRefNote(){
-  try{setRefNote(await api('GET','/api/reference-prices'))}catch(_){$('refNote').hidden=true}
+  try{setRefNote(await api('GET','/api/reference-prices'))}catch(_){$('refNote').hidden=true; S.refPlaceholder=false; renderBanner()}
 }
 async function openRefs(){
   S.refs=await api('GET','/api/reference-prices'); setRefNote(S.refs);
@@ -652,11 +837,11 @@ const TOUR=[
   ['example','Buka klaim contoh di slide 11 (peringkat 2) dan bandingkan dengan deck','Buka',openExample],
   ['reasons','Baca alasan, kontribusi skor, dan langkah berikut untuk satu klaim'],
   ['decide','Catat keputusan, misalnya "Dokumen diminta" beserta tanggapan RS'],
-  ['capacity','Geser kapasitas verifikator dan lihat isi antrean berubah','Ke pengaturan',()=>$('kk').scrollIntoView({behavior:'smooth',block:'center'})],
-  ['rs','Lihat tingkat flag per rumah sakit dan per kode (pemantauan bias)','Lihat',()=>{tick('rs');$('rsPanel').scrollIntoView({behavior:'smooth',block:'start'})}],
+  ['capacity','Geser kapasitas verifikator dan lihat isi antrean berubah','Ke pengaturan',()=>{tabs.set('queue'); $('ctlFold').open=true; $('kk').scrollIntoView({behavior:'smooth',block:'center'})}],
+  ['rs','Lihat tingkat flag per rumah sakit dan per kode (pemantauan bias)','Lihat',()=>{tabs.set('bias'); $('tabs').scrollIntoView({behavior:'smooth',block:'start'})}],
   ['robust','Buka halaman Ketahanan: kurva pada 2.000 klaim, termasuk pengulang yang sah (slide 13)','Buka',()=>{location.hash='#/robust'}],
   ['audit','Buka jejak audit: setiap tindakan Anda tercatat','Buka',()=>{location.hash='#/audit'}],
-  ['upload','Opsional: unggah berkas contoh E-Klaim di halaman Batch','Ke Batch',()=>{location.hash='#/batches'}],
+  ['upload','Opsional: unggah berkas contoh E-Klaim di halaman Berkas','Ke Berkas',()=>{location.hash='#/batches'}],
   ['feedback','Beri umpan balik, satu menit','Isi',()=>{location.hash='#/feedback'}]
 ];
 S.tour={}; S.tourHidden=false;
@@ -666,14 +851,14 @@ async function openExample(){
     if(!sample){toast('Sampel sintetis sudah dihapus dari sesi ini. Mulai sesi juri baru untuk mendapatkannya lagi.',true);return}
     await loadBatch(sample.id).catch(fail);
   }
-  const c=S.claims.find(x=>x.rank===2); if(c) selectClaim(c,true);
+  const c=S.claims.find(x=>x.rank===2); if(c){tabs.set('queue'); selectClaim(c,true)}
 }
 const tourKey=()=>'vk-tour-'+(S.user?S.user.username:'');
 function loadTour(){
   S.tour={}; S.tourHidden=false;
   let saved=false;
   try{const v=JSON.parse(sessionStorage.getItem(tourKey())||'null'); if(v){saved=true; S.tour=v.t||{}; S.tourHidden=!!v.h}}catch(_){}
-  if(!saved&&MOBILE.matches) S.tourHidden=true;
+  if(!saved) S.tourHidden=true;
   renderTour();
 }
 function saveTour(){try{sessionStorage.setItem(tourKey(),JSON.stringify({t:S.tour,h:S.tourHidden}))}catch(_){}}
@@ -681,9 +866,10 @@ function tick(id){if(!S.user||!S.user.guest||S.tour[id]) return; S.tour[id]=1; s
 function renderTour(){
   const box=$('tour'), show=!!(S.user&&S.user.guest&&S.batch);
   box.hidden=!show; if(!show) return;
+  box.classList.toggle('min',S.tourHidden);
   const done=TOUR.filter(t=>S.tour[t[0]]).length;
   if(S.tourHidden){
-    box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri</h2><span class="prog">${done} dari ${TOUR.length} langkah · <button type="button" class="go" data-tour="show">Tampilkan</button></span></div>`;
+    box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri</h2><span class="prog">${done} dari ${TOUR.length} langkah · <button type="button" class="go" data-tour="show" aria-label="Buka panduan juri">Buka</button></span></div>`;
     return;
   }
   box.innerHTML=`<div class="thead"><h2 id="tourTitle">Panduan juri: ${TOUR.length} langkah, sekitar 5 menit</h2>
@@ -697,9 +883,6 @@ $('tour').addEventListener('click',e=>{
   const t=TOUR.find(x=>x[0]===b.dataset.step); if(t&&t[3]) t[3]();
 });
 
-if('IntersectionObserver' in window){
-  new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting)&&S.route==='queue'&&S.batch) tick('rs')},{threshold:.4}).observe($('rsPanel'));
-}
 
 /* ---------- umpan balik ---------- */
 async function openFeedback(){
@@ -731,7 +914,7 @@ $('fbForm').addEventListener('submit',async e=>{
 });
 
 /* ---------- untuk halaman Koding (coding.js) ---------- */
-window.VK={S,$,api,esc,dots,dec,rp,rpShort,one,times,sc,when,toast,fail,icon,openSheet,closeSheet,tourTick:tick};
+window.VK={S,$,api,esc,dots,dec,rp,rpShort,one,times,sc,when,toast,fail,icon,openSheet,closeSheet,tourTick:tick,stripHtml,cardHtml,detailHtml,syncResp,bindTabs,listKeys,nextAfter,setPanel,focusDetail,PAGE};
 
 /* ---------- mulai ---------- */
 async function boot(){
