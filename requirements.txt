@@ -6,3 +6,4 @@ python-multipart==0.0.32
 itsdangerous==2.2.0
 scikit-learn==1.9.1
 numpy==2.5.3
+anthropic==1.17.0

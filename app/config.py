@@ -71,6 +71,12 @@ class Settings:
         self.guest_logins_per_ip_hour = _int("GUEST_LOGINS_PER_IP_HOUR", 60)
         self.guest_max_batches = _int("GUEST_MAX_BATCHES", 5)
 
+        # Second opinion from Claude on a claim (app/ai_judge.py). On only when an API key is set and
+        # AI_JUDGE is not "0". Guests are off by default so public demo traffic cannot run up the bill.
+        self.ai_judge = bool(os.getenv("ANTHROPIC_API_KEY", "").strip()) and os.getenv("AI_JUDGE", "1").strip() != "0"
+        self.ai_model = os.getenv("AI_MODEL", "").strip() or "claude-opus-5-5"
+        self.ai_guests = os.getenv("AI_GUESTS", "0").strip() == "1"
+
         # How many reverse proxies sit in front of the app, counted from the right of X-Forwarded-For.
         # Render adds its own proxy address after the client's, so the client is second from the right
         # (2). Entries further left are written by the client and are never trusted. 0 uses the socket

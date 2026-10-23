@@ -21,7 +21,7 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import coding, db as db_module, eklaim, scoring, services
+from . import ai_judge, coding, db as db_module, eklaim, scoring, services
 from .config import settings
 from .db import AuditLog, Base, Batch, Claim, CodingBatch, CodingClaim, Feedback, ReferencePrice, SessionLocal, User, engine, get_db, iso, utcnow
 from .security import DUMMY_HASH, LoginLimiter, client_ip, login_limiter, verify_password
@@ -195,6 +195,8 @@ def config():
         "codingFeatures": coding.FEATURES,
         "judgeMode": settings.judge_mode,
         "guestHours": settings.guest_hours,
+        "aiJudge": settings.ai_judge,
+        "aiGuests": settings.ai_guests,
     }
 
 
@@ -510,6 +512,24 @@ def claim_review(claim_id: int, body: ReviewIn, user: User = Depends(current_use
                    sep=claim.sep, detail=detail)
     db.commit()
     return claim_out(claim, full=True)
+
+
+@app.post("/api/claims/{claim_id}/ai-opinion", dependencies=[Depends(csrf)])
+def claim_ai_opinion(claim_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Advice only: never saved as a review decision. The request and answer go to the audit log."""
+    if user.role == services.GUEST_ROLE and not settings.ai_guests:
+        raise HTTPException(403, "Pendapat AI tidak tersedia untuk akun tamu.")
+    claim = get_claim(claim_id, db, user)
+    services.ensure_phi(db, claim)
+    try:
+        out = ai_judge.opinion(db, claim, visible_owner(user))
+    except ai_judge.AiJudgeError as e:
+        raise HTTPException(503, str(e))
+    services.audit(db, user, "ai_opinion", batch_id=claim.batch_id, sep=claim.sep,
+                   detail={"recommendation": out.get("recommendation"), "confidence": out.get("confidence"),
+                           "model": out.get("model"), "examples": out.get("examplesUsed")})
+    db.commit()
+    return out
 
 
 # ---------- upcoding check ----------

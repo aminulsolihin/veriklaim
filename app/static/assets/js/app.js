@@ -25,7 +25,7 @@ const ROLE={verifikator:'verifikator',supervisor:'supervisor',juri:'juri · tamu
 const PERAN={verifikator:'Verifikator / anti-fraud BPJS','koder-rs':'Koder / casemix RS',klinisi:'Dokter / nakes','manajemen-rs':'Manajemen RS',juri:'Juri / penilai',lainnya:'Lainnya'};
 const ROUTES=['queue','coding','batches','refs','robust','audit','feedback','about'];
 
-const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null,tab:'queue',limit:20,foldOpen:false,q:'',cnt:null};
+const S={user:null,config:null,batches:[],batch:null,claims:[],byId:{},thr:100,k:12,cut:0,view:'flagged',sel:null,draft:null,route:'queue',refs:[],refPlaceholder:false,rb:null,tab:'queue',limit:20,foldOpen:false,q:'',cnt:null,ai:{}};
 const UP_WARN=$('upWarn').textContent;
 let X1=5,Y0=0.3,Y1=0.76;
 
@@ -576,9 +576,29 @@ function renderWhy(){
       ['TARIF_RS',rp(c.tarifRs),'num'],
       ['Top-up'+(c.total?' · total tarif':''),rp(c.topup)+(c.total?' · '+rp(c.total):''),'num']
     ],
-    stages:[['Tahap 2 · Aturan tagihan',`<p>${s2}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s3}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]],
+    stages:[['Tahap 2 · Aturan tagihan',`<p>${s2}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s3}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]].concat(aiOn()?[['Pendapat kedua · Claude',aiHtml(c)]]:[]),
     open:S.foldOpen}));
 }
+const AI_REC={confirmed:'Temuan dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Minta dokumen'};
+const AI_CONF={low:'rendah',medium:'sedang',high:'tinggi'};
+function aiOn(){const g=S.config||{};return !!g.aiJudge&&!!S.user&&(!S.user.guest||!!g.aiGuests)}
+function aiHtml(c){
+  const a=S.ai[c.id];
+  if(!a) return '<p class="note">Saran saja, bukan keputusan. Data dikirim ke Claude tanpa nomor SEP dan token kartu.</p><button type="button" class="btn" id="aiBtn">Minta pendapat AI</button>';
+  if(a.loading) return '<p class="note">Meminta pendapat AI…</p>';
+  if(a.error) return `<p class="note">${esc(a.error)}</p><button type="button" class="btn" id="aiBtn">Coba lagi</button>`;
+  const li=xs=>xs&&xs.length?'<ul>'+xs.map(x=>`<li>${esc(x)}</li>`).join('')+'</ul>':'';
+  return `<p><b>${esc(AI_REC[a.recommendation]||a.recommendation)}</b> · keyakinan ${esc(AI_CONF[a.confidence]||a.confidence)}</p>
+    <p>${esc(a.summary)}</p>${li(a.reasons)}${a.documents&&a.documents.length?'<p>Dokumen yang perlu diminta:</p>'+li(a.documents):''}
+    <p class="note">${esc(a.model)} · ${a.examplesUsed} keputusan tim dipakai sebagai contoh. Saran saja; keputusan tetap pada verifikator.</p>`;
+}
+$('why').addEventListener('click',async e=>{
+  if(!e.target.closest('#aiBtn')||!S.sel) return;
+  const c=S.sel; S.ai[c.id]={loading:true}; S.foldOpen=true; renderWhy();
+  try{S.ai[c.id]=await api('POST','/api/claims/'+c.id+'/ai-opinion')}
+  catch(err){if(err.auth) return; S.ai[c.id]={error:err.message}}
+  if(S.sel&&S.sel.id===c.id) renderWhy();
+});
 /* formulir digambar ulang bersama panel, jadi dengarkan pada panel */
 $('why').addEventListener('input',e=>{
   const f=e.target.closest('#reviewForm'); if(!f||!S.sel) return;
