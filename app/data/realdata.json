@@ -1,0 +1,20 @@
+{
+ "source": "Data Sampel BPJS Kesehatan, FKRTL (kunjungan rumah sakit), lewat knowledge base transaction-kb",
+ "period": [
+  "2015-01-01",
+  "2024-12-31"
+ ],
+ "visits": 5362017,
+ "built": "2026-10-31",
+ "inpatientStays": 526011,
+ "outpatientVisits": 4836006,
+ "overlap": 777,
+ "overlapStartedInside": 226,
+ "overlapSameAdmissionDay": 330,
+ "overlapPrevOtherDistrict": 139,
+ "identicalStay": 24,
+ "outpatientInsideStay": 313,
+ "sameDayTransfer": 6030,
+ "readmit7SameDx": 6607,
+ "readmit30SameDx": 24720
+}

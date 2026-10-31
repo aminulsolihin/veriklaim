@@ -18,10 +18,12 @@ from typing import Callable, Sequence
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
+from . import baseline
+
 FEATURES = [
     {"key": "cover", "label": "Tagihan RS vs harga acuan"},
     {"key": "los", "label": "Lama rawat vs INA-CBG sama"},
-    {"key": "repeat", "label": "Top-up sama, kartu sama, 90 hari"},
+    {"key": "repeat", "label": "Top-up berulang di atas pola diagnosis"},
     {"key": "vol", "label": "Volume top-up RS vs sejawat"},
 ]
 N_FEATURES = len(FEATURES)
@@ -31,12 +33,17 @@ SEED = 7
 BACKGROUND_MAX = 120   # background claims used for the Shapley values
 REPEAT_WINDOW_DAYS = 90
 EAGER_EXPLAIN = 60     # claims explained at upload; the rest are explained when opened
+LOS_PRIOR_CLAIMS = 5   # the national stay median for the diagnosis counts as this many claims of the group
 
 _SEVERITY = re.compile(r"-[IVX0-9]+$")
 
 
 def featurize(rows: list[dict]) -> np.ndarray:
-    """Add the four features to each row and return the model matrix (n x 4)."""
+    """Add the four features to each row and return the model matrix (n x 4).
+
+    Where the claim's primary diagnosis has a national norm (baseline.py), the stay median of its
+    INA-CBG group is blended with the national median, and the repeat feature counts only the repeats
+    above the number a patient with that diagnosis normally has in the part of the window the file covers."""
     los_by_cbg: dict[str, list[int]] = defaultdict(list)
     count_by_pair: dict[tuple, int] = defaultdict(int)
     by_card: dict[tuple, list[dict]] = defaultdict(list)
@@ -51,23 +58,35 @@ def featurize(rows: list[dict]) -> np.ndarray:
     for (_, code), n in count_by_pair.items():
         counts_by_code[code].append(n)
     med_vol = {k: statistics.median(v) for k, v in counts_by_code.items()}
+    first = min((r["adm_day"] for r in rows), default=0)
+    last = max((r["adm_day"] for r in rows), default=0)
+    w = REPEAT_WINDOW_DAYS
 
     X = np.empty((len(rows), N_FEATURES), dtype=float)
     for i, r in enumerate(rows):
+        r["dx3"] = baseline.primary_dx(r.get("diag", ""))
+        nat = baseline.norm(r["dx3"], baseline.is_inpatient(r["inacbg"], r["los"]))
+        r["los_nat"] = float(nat["los_p50"]) if nat and nat.get("los_p50") is not None else None
         r["cover"] = r["tarif_rs"] / r["ref_price"]
-        r["los_median"] = float(med_los[r["_cbg"]])
+        n_cbg, med = len(los_by_cbg[r["_cbg"]]), float(med_los[r["_cbg"]])
+        if r["los_nat"] is not None:
+            med = (n_cbg * med + LOS_PRIOR_CLAIMS * max(1.0, r["los_nat"])) / (n_cbg + LOS_PRIOR_CLAIMS)
+        r["los_median"] = med
         r["los_ratio"] = max(1, r["los"]) / max(1.0, r["los_median"])
         same = by_card.get((r["card_token"], r["cmg_code"]), ()) if r["card_token"] else ()
-        r["repeat_n"] = sum(1 for o in same if o is not r and abs(o["adm_day"] - r["adm_day"]) <= REPEAT_WINDOW_DAYS)
+        r["repeat_n"] = sum(1 for o in same if o is not r and abs(o["adm_day"] - r["adm_day"]) <= w)
+        # national visits per day for the diagnosis, times the days of the +/- window that this file covers
+        seen_days = max(0, min(r["adm_day"] + w, last) - max(r["adm_day"] - w, first))
+        r["repeat_exp"] = round(float(nat["near_mean"]) * seen_days / (2 * w), 3) if nat and nat.get("near_mean") else 0.0
         r["vol_n"] = count_by_pair[(r["kode_rs"], r["cmg_code"])]
         r["vol_ratio"] = r["vol_n"] / max(1.0, med_vol[r["cmg_code"]])
-        X[i] = feature_vector(r["cover"], r["los_ratio"], r["repeat_n"], r["vol_ratio"])
+        X[i] = feature_vector(r["cover"], r["los_ratio"], r["repeat_n"], r["vol_ratio"], r["repeat_exp"])
         del r["_cbg"]
     return X
 
 
-def feature_vector(cover: float, los_ratio: float, repeat_n: int, vol_ratio: float) -> list[float]:
-    return [math.log2(cover), math.log2(los_ratio), float(repeat_n), math.log2(vol_ratio)]
+def feature_vector(cover: float, los_ratio: float, repeat_n: int, vol_ratio: float, repeat_exp: float = 0.0) -> list[float]:
+    return [math.log2(cover), math.log2(los_ratio), max(0.0, repeat_n - (repeat_exp or 0.0)), math.log2(vol_ratio)]
 
 
 class Model:

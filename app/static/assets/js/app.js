@@ -13,7 +13,9 @@ const sc=v=>dec(v,3);
 const one=v=>dec(Math.round(v*10)/10,1).replace(/,0$/,'');
 const when=s=>{if(!s)return '';const d=new Date(s);return isNaN(d)?'':d.toLocaleString('id-ID',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})};
 
-const STATUS={both:'Kedua pemeriksaan',rule:'Aturan tagihan',model:'Lapisan anomali',clear:'Bersih'};
+const STATUS={both:'Kedua pemeriksaan',rule:'Aturan tagihan',model:'Lapisan anomali',hist:'SEP ganda atau rawat tumpang tindih',clear:'Bersih'};
+/* nama status untuk satu klaim: aturan catatan dinamai menurut yang berlaku */
+const stName=c=>c.st!=='hist'?STATUS[c.st]:c.hf&&c.of?'SEP ganda dan rawat tumpang tindih':c.of?'Rawat tumpang tindih':'SEP sudah diajukan';
 const REVIEW={confirmed:'Temuan dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Dokumen diminta'};
 const KIND={SR:'Special Prosthesis',SD:'Special Drug'};
 const CREV={confirmed:'Upcoding dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Rekam medis diminta'};
@@ -189,14 +191,14 @@ async function loadBatch(id){
 function classify(){
   const C=S.claims,N=C.length;
   S.cut=(C[S.k-1].score+C[Math.min(S.k,N-1)].score)/2;
-  C.forEach(c=>{c.pf=c.cover*100<S.thr-1e-9; c.mf=c.rank<=S.k; c.st=c.pf&&c.mf?'both':c.pf?'rule':c.mf?'model':'clear'});
+  C.forEach(c=>{c.pf=c.cover*100<S.thr-1e-9; c.mf=c.rank<=S.k; c.hf=c.histBatch!=null; c.of=c.overlapN>0; c.st=c.pf&&c.mf?'both':c.pf?'rule':c.mf?'model':c.hf||c.of?'hist':'clear'});
 }
 function counts(){
-  const n={pf:0,mf:0,both:0,ruleOnly:0,modelOnly:0,flag:0,ruleValue:0,modelValue:0,inj:0,caught:0,ruleCaught:0,extra:0,injValue:0,caughtValue:0,confirmed:0,cleared:0,docs:0};
+  const n={pf:0,mf:0,both:0,ruleOnly:0,modelOnly:0,histOnly:0,hf:0,of:0,flag:0,ruleValue:0,modelValue:0,inj:0,caught:0,ruleCaught:0,extra:0,injValue:0,caughtValue:0,confirmed:0,cleared:0,docs:0};
   S.claims.forEach(c=>{
     const flagged=c.st!=='clear';
     if(c.pf){n.pf++;n.ruleValue+=c.topup}
-    if(c.mf)n.mf++;
+    if(c.mf)n.mf++; if(c.hf||c.of)n.hf++; if(c.of)n.of++; if(c.st==='hist')n.histOnly++;
     if(c.st==='both')n.both++; if(c.st==='rule')n.ruleOnly++; if(c.st==='model'){n.modelOnly++;n.modelValue+=c.topup}
     if(flagged){
       n.flag++;
@@ -214,6 +216,7 @@ function mark(st,cx,cy,k){
   k=k||1;
   if(st==='rule') return `<rect x="${cx-4.5*k}" y="${cy-4.5*k}" width="${9*k}" height="${9*k}" rx="1" fill="var(--c-rule)" stroke="var(--mark-line)" stroke-width="1.5"/>`;
   if(st==='model') return `<path d="M${cx},${cy-6.5*k} L${cx+6*k},${cy+4.5*k} L${cx-6*k},${cy+4.5*k} Z" fill="var(--c-model)" stroke="var(--surface)" stroke-width="1.5" stroke-linejoin="round"/>`;
+  if(st==='hist') return `<rect x="${cx-4.5*k}" y="${cy-4.5*k}" width="${9*k}" height="${9*k}" rx="1" fill="var(--surface)" stroke="var(--ink)" stroke-width="2"/>`;
   if(st==='both') return `<path d="M${cx},${cy-6.5*k} L${cx+6.5*k},${cy} L${cx},${cy+6.5*k} L${cx-6.5*k},${cy} Z" fill="var(--c-rule)" stroke="var(--c-model)" stroke-width="2.5" stroke-linejoin="round"/>`;
   return `<circle cx="${cx}" cy="${cy}" r="${4*k}" fill="var(--c-clear)" stroke="var(--surface)" stroke-width="1"/>`;
 }
@@ -327,8 +330,8 @@ document.querySelectorAll('.tblwrap').forEach((el,i)=>{
 function topDriver(c){if(!c.phi)return -1;let b=0;for(let i=1;i<c.phi.length;i++)if(c.phi[i]>c.phi[b])b=i;return b}
 function featText(c,i){
   if(i===0) return times(c.cover)+' acuan';
-  if(i===1) return c.los+' hari, median '+one(c.losMed);
-  if(i===2) return c.rep+' klaim lain';
+  if(i===1) return c.los+' hari, median '+one(c.losMed)+(c.losNat!=null?' (nasional '+c.dx+' '+one(c.losNat)+')':'');
+  if(i===2) return c.rep+' klaim lain'+(c.repExp>0?', lazim '+one(c.repExp):'');
   return times(c.vol)+' median sejawat';
 }
 
@@ -336,7 +339,10 @@ function featText(c,i){
 function renderHead(){
   const b=S.batch,N=S.claims.length;
   $('batchTitle').textContent=b.name;
-  $('databar').innerHTML=`<span><b>${dots(N)}</b> klaim ber-top-up disaring dari ${dots(b.rowsTotal)} baris</span><span>diunggah oleh ${esc(b.uploadedBy)}, ${esc(when(b.uploadedAt))}</span>`;
+  $('databar').innerHTML=`<span><b>${dots(N)}</b> klaim ber-top-up disaring dari ${dots(b.rowsTotal)} baris</span><span>diunggah oleh ${esc(b.uploadedBy)}, ${esc(when(b.uploadedAt))}</span>`
+    +(b.histSep?`<span><b>${dots(b.histSep)}</b> SEP sudah diajukan di batch sebelumnya</span>`:'')
+    +(b.overlap?`<span><b>${dots(b.overlap)}</b> rawat tumpang tindih</span>`:'')
+    +((b.histReexport||[]).length?`<span>ekspor ulang dari ${b.histReexport.map(x=>'“'+esc(x.name||'batch #'+x.id)+'”').join(', ')}, tidak dibandingkan</span>`:'');
   const skip=[];
   if(b.noTopup) skip.push(`${dots(b.noTopup)} baris tanpa top-up obat atau alkes`);
   if(b.noRef) skip.push(`${dots(b.noRef)} baris dengan top-up tanpa harga acuan`);
@@ -376,8 +382,8 @@ function renderKpis(n){
   renderBanner();
 }
 function renderLegend(n){
-  $('legend').innerHTML=[['both',n.both],['rule',n.ruleOnly],['model',n.modelOnly],['clear',S.claims.length-n.flag]]
-    .map(([st,v])=>`<span>${icon(st)}${st==='both'?'Ditandai kedua pemeriksaan':st==='rule'?'Aturan tagihan saja':st==='model'?'Lapisan anomali saja':'Bersih'} <b>${v}</b></span>`).join('');
+  $('legend').innerHTML=[['both',n.both],['rule',n.ruleOnly],['model',n.modelOnly]].concat(n.hf?[['hist',n.histOnly]]:[]).concat([['clear',S.claims.length-n.flag]])
+    .map(([st,v])=>`<span>${icon(st)}${st==='both'?'Ditandai kedua pemeriksaan':st==='rule'?'Aturan tagihan saja':st==='model'?'Lapisan anomali saja':st==='hist'?(n.of?'SEP ganda atau rawat tumpang tindih saja':'SEP sudah diajukan saja'):'Bersih'} <b>${v}</b></span>`).join('');
 }
 function groupRates(key,make){
   const by={}, N=S.claims.length; let flagged=0;
@@ -429,7 +435,7 @@ function drawChart(){
   const tl=`tagihan < ${S.thr}%`, right=tx+8+tl.length*7.2<W-m.r-90;
   g+=`<text class="thl" x="${right?tx+7:tx-7}" y="${m.t+10}" text-anchor="${right?'start':'end'}">${tl}</text>`;
   g+=`<text class="thl" x="${W-m.r-2}" y="${ty-6}" text-anchor="end">batas ${dec(S.cut,2)}</text>`;
-  const order={clear:0,rule:1,model:2,both:3};
+  const order={clear:0,hist:1,rule:2,model:3,both:4};
   [...S.claims].sort((a,b)=>order[a.st]-order[b.st]).forEach(c=>{
     c._cx=+x(c.cover).toFixed(1); c._cy=+y(c.score).toFixed(1);
     g+=mark(c.st,c._cx,c._cy);
@@ -444,7 +450,7 @@ function drawChart(){
   box.addEventListener('mousemove',e=>{
     const t=e.target.closest&&e.target.closest('.hit'), c=t&&S.byId[t.dataset.id];
     if(!c){tip.hidden=true;return}
-    tip.innerHTML=`<b>${esc(c.sep)}</b>${esc(c.final||c.code)} ${esc(c.item)}<br>tagihan <span class="num">${times(c.cover)}</span> acuan · skor <span class="num">${sc(c.score)}</span><br>${STATUS[c.st]}${c.review?' · '+REVIEW[c.review.status]:''}`;
+    tip.innerHTML=`<b>${esc(c.sep)}</b>${esc(c.final||c.code)} ${esc(c.item)}<br>tagihan <span class="num">${times(c.cover)}</span> acuan · skor <span class="num">${sc(c.score)}</span><br>${stName(c)}${c.review?' · '+REVIEW[c.review.status]:''}`;
     tip.hidden=false;
     const bw=box.clientWidth, tw=tip.offsetWidth;
     tip.style.left=(c._cx+22+tw>bw-8?Math.max(8,c._cx-6-tw):c._cx+22)+'px';
@@ -475,11 +481,12 @@ function renderRows(){
   $('qMoreRow').hidden=total<=S.limit; $('qMore').textContent=`Tampilkan ${Math.min(PAGE,total-S.limit)} lagi (sisa ${dots(total-S.limit)})`;
   $('rows').innerHTML=list.map(c=>{
     const d=c.mf?topDriver(c):-1;
-    const reason=d>=0?`${DRIVER[d]}: ${featText(c,d)}`:c.pf?`Tagihan RS: ${times(c.cover)} acuan`:'';
+    const rec=[c.hf?'SEP sudah ada di batch sebelumnya':'',c.of?`rawat tumpang tindih dengan ${c.overlapN} klaim lain`:'',c.readmitDays?`dirawat lagi ${c.readmitDays} hari setelah pulang`:''].filter(Boolean).join(' · ');
+    const reason=[d>=0?`${DRIVER[d]}: ${featText(c,d)}`:c.pf?`Tagihan RS: ${times(c.cover)} acuan`:'',rec].filter(Boolean).join(' · ');
     return cardHtml({id:c.id,pfx:'c',sep:c.sep,st:c.st,current:S.sel===c,rv:c.review?REVIEW[c.review.status]:'',
       title:esc(c.item),
       meta:`<span class="num sepn">${esc(c.sep)}</span><span class="msub">RS ${esc(c.rs)} · pulang ${esc(c.disTxt||c.admTxt)}</span>`,
-      why:`<b>${STATUS[c.st]}</b>${reason?' · '+esc(reason):''}`});
+      why:`<b>${stName(c)}</b>${reason?' · '+esc(reason):''}`});
   }).join('')||`<li class="noclaims">${q?`Tidak ada klaim yang cocok dengan “${esc(q)}”. Hapus pencarian untuk melihat semua.`:S.view==='todo'?'Semua klaim di antrean sudah diperiksa. Ekspor CSV untuk melaporkan hasilnya.':'Tidak ada klaim di antrean dengan pengaturan ini. Naikkan ambang tagihan atau kapasitas verifikator.'}</li>`;
   $('exportCsv').href=`/api/batches/${S.batch.id}/export.csv?view=${S.view==='all'?'all':'flagged'}&thr=${S.thr}&k=${S.k}`;
 }
@@ -514,25 +521,78 @@ async function selectClaim(c,user,focus){
     if(S.sel===c){renderWhy(); renderRows()}
   }catch(e){fail(e)}
 }
+function histReasons(c){
+  const h=c.history, out=[];
+  if(c.hf){
+    let t=`SEP ini sudah ada di ${c.histSepN>1?c.histSepN+' batch':'batch'} sebelumnya. Satu SEP adalah satu episode perawatan: bila keduanya dibayar, episode yang sama dibayar dua kali.`;
+    const p=h&&h.sameSep[0];
+    if(p){
+      const same=p.tarifRs===c.tarifRs&&p.topup===c.topup;
+      t+=same?` Nilainya sama dengan di “${esc(p.batchName)}” (TARIF_RS ${rp(p.tarifRs)}, top-up ${rp(p.topup)}), jadi kemungkinan diajukan ulang.`
+        :` Nilainya berbeda dari di “${esc(p.batchName)}”: TARIF_RS ${rp(p.tarifRs)} menjadi ${rp(c.tarifRs)}, top-up ${rp(p.topup)} menjadi ${rp(c.topup)}. Bisa klaim koreksi, bisa tagihan ganda.`;
+      if(p.review) t+=` Keputusan di batch itu: ${esc(REVIEW[p.review]||p.review)}.`;
+    }else if(h&&h.removed) t+=' Batch pembandingnya sudah dihapus, jadi klaim sebelumnya tidak bisa ditampilkan lagi.';
+    out.push(t);
+  }
+  if(c.histRep>0) out.push(`Di batch sebelumnya, kartu yang sama punya ${c.histRep} klaim lain dengan top-up ini dalam 90 hari. Angka ini tidak ikut skor anomali, yang hanya melihat berkas ini.`+(c.histRep===1&&c.kind==='SR'?' Satu pengulangan bisa wajar, misalnya sisi kedua pada penggantian sendi bilateral.':''));
+  if(c.of){
+    const o=(c.overlapWith||[])[0];
+    out.push(`Kartu yang sama punya ${c.overlapN} klaim lain yang waktu rawatnya tumpang tindih dengan klaim ini${o?` (SEP ${esc(o.sep)}, RS ${esc(o.rs)}, ${esc(o.adm)} – ${esc(o.dis)}, ${where(o)})`:''}. Pasien tidak bisa dirawat di dua tempat sekaligus, jadi paling tidak satu klaim keliru: rawat fiktif, tagihan ganda, atau tanggal yang salah. Pindah rumah sakit pada hari pulang tidak dihitung.`);
+  }
+  if(c.readmitDays){
+    const w=c.readmitWith, r=c.readmitRate;
+    out.push(`Pasien ini dirawat lagi ${c.readmitDays} hari setelah pulang dari rawat inap dengan diagnosis primer yang sama (${esc(c.dx)}${w?`, SEP ${esc(w.sep)}, RS ${esc(w.rs)}, ${where(w)}`:''}).`
+      +(r!=null?` Secara nasional ${pct(r)} rawat inap ${esc(c.dx)} diikuti rawat inap ulang dalam 7 hari (data sampel BPJS).`:'')
+      +' Bisa kambuh, bisa juga satu episode yang dipecah menjadi dua klaim. Ini konteks; klaim tidak masuk antrean karenanya.');
+  }
+  return out;
+}
+/* di mana klaim pembanding berada */
+function where(o){
+  if(o.batch==null) return o.topup?'di berkas ini':'di berkas ini, tanpa top-up';
+  const b=S.batches.find(x=>x.id===o.batch);
+  return b?`di “${esc(b.name)}”`:'di batch sebelumnya';
+}
+function histStage(c){
+  const out=[], h=c.history;
+  if((c.overlapWith||[]).length){
+    const li=o=>`<li><span class="num">${esc(o.sep)}</span> · RS ${esc(o.rs)} · ${esc(o.adm)} – ${esc(o.dis)} · diagnosis ${esc(o.dx||'-')} · ${where(o)}</li>`;
+    out.push(['Rawat tumpang tindih',`<p>Klaim ini: RS ${esc(c.rs)}, ${esc(c.admTxt)} – ${esc(c.disTxt)}. Klaim lain kartu yang sama pada waktu yang sama:</p><ul>${c.overlapWith.map(li).join('')}</ul>`
+      +'<p class="note">Dibandingkan dengan semua klaim kartu ini di berkas (dengan atau tanpa top-up) dan klaim top-up di batch sebelumnya. Masuk pada hari pulang (rujukan) tidak dihitung. Pada data sampel BPJS aturan ini berlaku untuk sekitar 15 dari 10.000 rawat inap; lihat halaman Ketahanan.</p>']);
+  }
+  if(h&&(h.sameSep.length||h.sameCard.length)){
+    const li=x=>`<li><span class="num">${esc(x.sep)}</span> · “${esc(x.batchName)}” · RS ${esc(x.rs)} · masuk ${esc(x.admTxt)} · TARIF_RS <span class="num">${rp(x.tarifRs)}</span> · top-up <span class="num">${rp(x.topup)}</span>${x.review?' · '+esc(REVIEW[x.review]||x.review):''}</li>`;
+    const part=(title,xs)=>xs.length?`<p>${title}</p><ul>${xs.map(li).join('')}</ul>`:'';
+    out.push(['Riwayat lintas batch',part('SEP yang sama di batch sebelumnya:',h.sameSep)+part('Kartu dan top-up yang sama dalam 90 hari, di batch sebelumnya:',h.sameCard)
+      +'<p class="note">Hanya batch di ruang kerja yang sama. Batch yang sebagian besar SEP-nya sama dianggap ekspor ulang dan tidak dibandingkan.</p>']);
+  }
+  return out;
+}
 function reasonsFor(c){
-  const phi=c.phi, isSR=c.kind==='SR', item=(c.item||'item').toLowerCase(), reasons=[];
+  const phi=c.phi, isSR=c.kind==='SR', item=(c.item||'item').toLowerCase(), reasons=histReasons(c);
   if(c.pf) reasons.push(`Seluruh tagihan rumah sakit lebih rendah dari harga acuan ${esc(item)} yang diklaim top-up-nya. Barang itu mungkin tidak diberikan, atau yang dipakai lebih murah dari yang diklaim.`);
   const short=c.los<c.losMed;
   if(phi){
     [0,1,2,3].sort((a,b)=>phi[b]-phi[a]).forEach(i=>{
       if(phi[i]<0.03) return;
       if(i===0&&!c.pf) reasons.push(`Tagihan ${times(c.cover)} harga acuan, tidak biasa dibanding klaim lain di batch ini.`);
-      if(i===1) reasons.push(short?`Lama rawat ${c.los} hari, padahal median INA-CBG yang sama ${one(c.losMed)} hari.`:`Lama rawat ${c.los} hari, lebih panjang dari median ${one(c.losMed)}. Tidak biasa, tetapi rawat panjang bukan sinyal risiko untuk top-up.`);
-      if(i===2) reasons.push(`Kartu yang sama punya ${c.rep} klaim lain dengan top-up ini dalam 90 hari.`+(c.rep===1&&isSR?' Satu pengulangan bisa wajar, misalnya sisi kedua pada penggantian sendi bilateral.':''));
+      if(i===1) reasons.push((short?`Lama rawat ${c.los} hari, padahal median INA-CBG yang sama ${one(c.losMed)} hari.`:`Lama rawat ${c.los} hari, lebih panjang dari median ${one(c.losMed)}. Tidak biasa, tetapi rawat panjang bukan sinyal risiko untuk top-up.`)
+        +(c.losNat!=null?` Median itu sudah ditarik ke median nasional diagnosis ${esc(c.dx)}, ${one(c.losNat)} hari.`:''));
+      if(i===2) reasons.push(`Kartu yang sama punya ${c.rep} klaim lain dengan top-up ini dalam 90 hari.`
+        +(c.repExp>0?` Pasien dengan diagnosis ${esc(c.dx)} lazimnya punya ${one(c.repExp)} kunjungan lain dalam rentang yang sama (data sampel BPJS), jadi model hanya menghitung kelebihannya.`:'')
+        +(c.rep===1&&isSR?' Satu pengulangan bisa wajar, misalnya sisi kedua pada penggantian sendi bilateral.':''));
       if(i===3) reasons.push(c.vol>1?`Rumah sakit ini punya ${c.volN} klaim dengan top-up ini di berkas, ${times(c.vol)} median rumah sakit lain.`:`Rumah sakit ini punya lebih sedikit klaim dengan top-up ini dibanding sejawatnya (${times(c.vol)}). Tidak biasa, tetapi volume rendah bukan sinyal risiko.`);
     });
   }
   let next='';
   if(c.st!=='clear'){
-    const fiktif=phi&&c.mf&&!c.pf&&(phi[2]>=0.03&&c.rep>=2||phi[1]>=0.03&&short&&c.rep>=1);
+    const extra=c.rep-(c.repExp||0);  // repeats above what the diagnosis normally has
+    const fiktif=phi&&c.mf&&!c.pf&&(phi[2]>=0.03&&extra>=2||phi[1]>=0.03&&short&&extra>=1);
     if(fiktif) reasons.push('Top-up berulang dan rawat sangat singkat dengan tagihan yang tampak wajar adalah jejak pola klaim fiktif (phantom billing). Ini perlu diverifikasi; model tidak membuktikannya.');
-    next=c.pf?(isSR?'Minta faktur pembelian implan dan stiker atau nomor seri implan pada laporan operasi.':'Minta catatan penyerahan obat dari farmasi dan waktu pemberian obat di rekam medis.')
-      :c.rep>=1?(isSR?'Cocokkan tiap rawat inap dengan laporan operasi dan catatan implan, dan pastikan sendi mana yang diganti setiap kali.':'Cocokkan tiap rawat inap dengan rekam medis dan catatan pemberian obat.')
+    next=c.of?'Minta catatan masuk dan pulang serta rekam medis kedua episode dari rumah sakit yang mengajukan. Bila salah satunya rujukan, pastikan tanggal pulang di rumah sakit asal benar; bila tidak, klaim yang tidak didukung rekam medis tidak dibayar.'
+      :c.hf?'Cocokkan dengan klaim SEP yang sama di batch sebelumnya dan status pembayarannya. Bila sudah dibayar, klaim ini tidak dibayar lagi. Bila ini klaim koreksi, minta rumah sakit menjelaskan apa yang diubah dan mengapa.'
+      :c.pf?(isSR?'Minta faktur pembelian implan dan stiker atau nomor seri implan pada laporan operasi.':'Minta catatan penyerahan obat dari farmasi dan waktu pemberian obat di rekam medis.')
+      :extra>=1?(isSR?'Cocokkan tiap rawat inap dengan laporan operasi dan catatan implan, dan pastikan sendi mana yang diganti setiap kali.':'Cocokkan tiap rawat inap dengan rekam medis dan catatan pemberian obat.')
       :'Periksa dokumen pendukung klaim ini sebelum dibayar.';
   }
   if(!reasons.length) reasons.push(phi?'Tidak ada yang menonjol pada tagihan, lama rawat, top-up berulang, atau volume.':'Memuat penjelasan.');
@@ -541,7 +601,9 @@ function reasonsFor(c){
 function renderWhy(){
   const c=S.sel; if(!c){$('why').innerHTML='<div class="empty-detail"><p>Pilih klaim di daftar untuk melihat alasannya dan mencatat keputusan.</p></div>';return}
   const phi=c.phi, base=S.batch.baseScore, N=S.claims.length;
-  const verdict={both:'Ditandai aturan tagihan dan lapisan anomali',rule:'Ditandai aturan tagihan saja',model:'Ditandai lapisan anomali saja',clear:'Tidak masuk antrean dengan pengaturan ini'}[c.st];
+  const verdict={both:'Ditandai aturan tagihan dan lapisan anomali',rule:'Ditandai aturan tagihan saja',model:'Ditandai lapisan anomali saja',
+    hist:c.hf&&c.of?'SEP ini sudah diajukan, dan rawat inapnya tumpang tindih dengan klaim lain':c.of?'Rawat inap ini tumpang tindih dengan klaim lain kartu yang sama':'SEP ini sudah diajukan di batch sebelumnya',
+    clear:'Tidak masuk antrean dengan pengaturan ini'}[c.st];
   const s2=c.pf
     ?`TARIF_RS <span class="num">${rp(c.tarifRs)}</span>, yaitu <b>${times(c.cover)}</b> harga acuan item (<span class="num">${rp(c.ref)}</span>). Di bawah ambang ${S.thr}%, padahal top-up <span class="num">${rp(c.topup)}</span> diklaim.`
     :`TARIF_RS <span class="num">${rp(c.tarifRs)}</span>, yaitu <b>${times(c.cover)}</b> harga acuan item (<span class="num">${rp(c.ref)}</span>). Lolos pada ambang ${S.thr}%.`;
@@ -561,7 +623,7 @@ function renderWhy(){
     panelId:'why',
     ids:{form:'reviewForm',note:'reviewNote',resp:'rsResponse',reopen:'reopen',radio:'status'},
     tag:S.batch.labelled?`<span class="tag">Label sintetis · ${c.label?LABELS[c.label]||esc(c.label):'klaim biasa'}</span>`:'',
-    st:c.st, status:STATUS[c.st], sep:c.sep, verdict, hero:`${esc(c.item)} · <span class="num">${esc(c.final||c.code)}</span>`,
+    st:c.st, status:stName(c), sep:c.sep, verdict, hero:`${esc(c.item)} · <span class="num">${esc(c.final||c.code)}</span>`,
     reasonsTitle:c.st==='clear'?'Penjelasan':'Mengapa ditandai', reasons, next,
     rv, draft, labels:REVIEW,
     opts:[['confirmed','Temuan dikonfirmasi','top-up tidak didukung'],['cleared','Dinyatakan wajar','klaim sesuai'],['docs_requested','Dokumen diminta','menunggu jawaban rumah sakit']],
@@ -576,7 +638,7 @@ function renderWhy(){
       ['TARIF_RS',rp(c.tarifRs),'num'],
       ['Top-up'+(c.total?' · total tarif':''),rp(c.topup)+(c.total?' · '+rp(c.total):''),'num']
     ],
-    stages:[['Tahap 2 · Aturan tagihan',`<p>${s2}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s3}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]].concat(aiOn()?[['Pendapat kedua · Claude',aiHtml(c)]]:[]),
+    stages:[['Tahap 2 · Aturan tagihan',`<p>${s2}</p>`],['Tahap 3 · Lapisan anomali',`<p>${s3}</p>`],['Tahap 4 · Apa yang menaikkan skor',bars]].concat(histStage(c)).concat(aiOn()?[['Pendapat kedua · Claude',aiHtml(c)]]:[]),
     open:S.foldOpen}));
 }
 const AI_REC={confirmed:'Temuan dikonfirmasi',cleared:'Dinyatakan wajar',docs_requested:'Minta dokumen'};
@@ -657,7 +719,7 @@ function upWarnText(kind){
 function setKind(k){
   UP_KIND=k;
   document.querySelectorAll('#upKind button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.kind===k)));
-  $('upSample').href=SAMPLE[k]; $('upHint').hidden=k!=='coding'; $('upMsg').textContent='';
+  $('upSample').href=SAMPLE[k]; $('upFollow').hidden=k!=='topup'; $('upHint').hidden=k!=='coding'; $('upMsg').textContent='';
   $('upBtn').textContent=k==='coding'?'Unggah dan periksa':'Unggah dan saring';
   $('upWarn').textContent=upWarnText(k);
 }
@@ -685,7 +747,7 @@ async function openBatches(){
       <td><b>${esc(b.name)}</b> ${tag('Top-up')}<span class="sm">${esc(b.filename)}${b.labelled?' · sampel sintetis':''}</span></td>
       <td>${who}</td>
       <td><span class="num">${dots(b.rowsScreened)}</span> disaring dari <span class="num">${dots(b.rowsTotal)}</span>${skipped?`<span class="sm">dilewati: ${skipped}</span>`:''}</td>
-      <td><span class="num">${b.flagged}</span> di antrean<span class="sm">${b.reviewed} diperiksa · tagihan &lt; ${b.thresholdPct}%, ${b.topK} teratas</span></td>
+      <td><span class="num">${b.flagged}</span> di antrean<span class="sm">${b.reviewed} diperiksa · tagihan &lt; ${b.thresholdPct}%, ${b.topK} teratas${b.histSep?`, ${b.histSep} SEP sudah diajukan`:''}${b.overlap?`, ${b.overlap} rawat tumpang tindih`:''}</span></td>
       <td class="act">${btn}</td></tr>`;
   }).join('')||'<tr><td colspan="5">Belum ada batch. Unggah berkas TXT E-Klaim untuk membuat yang pertama.</td></tr>';
 }
@@ -721,12 +783,23 @@ $('uploadForm').addEventListener('submit',async e=>{
       msg.textContent=`${dots(b.rowsRead)} klaim dibaca, ${dots(b.compared)} klaim II/III dibandingkan. ${b.queued} masuk antrean.`;
       window.VKCoding.focus(b.id); location.hash='#/coding';
     }else{
-      msg.textContent=`${dots(b.rowsScreened)} dari ${dots(b.rowsTotal)} baris disaring. ${b.flagged} klaim masuk antrean.`;
+      msg.textContent=`${dots(b.rowsScreened)} dari ${dots(b.rowsTotal)} baris disaring. ${b.flagged} klaim masuk antrean.`+histMsg(b);
       S.batch=null; await loadBatches(); await loadBatch(b.id); location.hash='#/queue';
     }
   }catch(err){if(!err.auth) msg.textContent=err.message+' Tidak ada yang disimpan.'}
   finally{btn.disabled=false}
 });
+
+function histMsg(b){
+  let t='';
+  if(b.histSep) t+=` ${dots(b.histSep)} di antaranya punya SEP yang sudah ada di batch sebelumnya.`;
+  if(b.histCard) t+=` ${dots(b.histCard)} klaim memakai kartu dan top-up yang sama dengan klaim di batch sebelumnya dalam 90 hari.`;
+  if(b.overlap) t+=` ${dots(b.overlap)} klaim punya waktu rawat yang tumpang tindih dengan klaim lain kartu yang sama, dan masuk antrean.`;
+  if(b.readmit) t+=` ${dots(b.readmit)} klaim adalah rawat inap ulang dalam 7 hari dengan diagnosis sama (konteks, tidak masuk antrean).`;
+  if((b.histReexport||[]).length) t+=` Berkas ini sebagian besar sama dengan ${b.histReexport.map(x=>'“'+(x.name||'batch #'+x.id)+'”').join(', ')}, jadi dianggap ekspor ulang: SEP yang sama dengan batch itu tidak ditandai.`;
+  if(b.histKeySkipped) t+=` ${dots(b.histKeySkipped)} batch lama dibuat sebelum pembaruan ini atau dengan SECRET_KEY lain, jadi token kartunya tidak dibandingkan (SEP tetap dibandingkan).`;
+  return t;
+}
 
 /* ---------- harga acuan ---------- */
 function setRefNote(list){
@@ -808,7 +881,30 @@ async function openRobust(){
   $('rbBench').innerHTML=b.runs.map(r=>[`${dec(r.seconds,1)} detik`,`${dots(r.rows)} baris berkas${r.topupShare<1?', '+Math.round(r.topupShare*100)+'% ber-top-up':', semuanya top-up'}`,`memori puncak ${dec(r.peakGb,2).replace(/0$/,'')} GB`])
     .concat([[dots(S.config.maxClaims),'klaim per unggahan pada demo ini','batas karena server gratis']])
     .map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}<br>${k[2]}</div></div>`).join('');
+  renderRealData(d.realData); renderDxEval(d.dxEval);
   drawRobust();
+}
+function renderRealData(r){
+  $('rdPanel').hidden=!r; if(!r) return;
+  const per=(v,n)=>dec(v/n*1e4,1).replace(/,0$/,'');
+  $('rdLede').textContent=`${dots(r.visits)} kunjungan rumah sakit (FKRTL, ${r.period[0].slice(0,4)}–${r.period[1].slice(0,4)}) dari Data Sampel BPJS Kesehatan: ${dots(r.inpatientStays)} rawat inap dan ${dots(r.outpatientVisits)} kunjungan rawat jalan. Pasien tidak bisa dirawat di dua tempat sekaligus, jadi tumpang tindih jarang dan mudah dijelaskan; rujukan pada hari pulang jauh lebih sering dan tidak ditandai.`;
+  const ip=r.inpatientStays, op=r.outpatientVisits;
+  $('rdRows').innerHTML=[
+    ['Rawat inap yang tumpang tindih dengan rawat inap lain pasien yang sama','berbagi malam dengan rawat inap lain; kedua klaim dihitung, karena keduanya masuk antrean',r.overlap,ip,'Masuk antrean'],
+    ['… dimulai sebelum rawat inap sebelumnya selesai, di kabupaten/kota lain','',r.overlapPrevOtherDistrict,ip,'Masuk antrean'],
+    ['… rawat inap identik','tanggal masuk, pulang, dan diagnosis sama; kedua klaim dihitung',r.identicalStay,ip,'Masuk antrean'],
+    ['Kunjungan rawat jalan di tengah rawat inap','pada hari di antara masuk dan pulang',r.outpatientInsideStay,op,'Masuk antrean'],
+    ['Masuk rumah sakit pada hari pulang dari rawat inap sebelumnya','rujukan atau pindah rumah sakit',r.sameDayTransfer,ip,'Tidak ditandai'],
+    ['Rawat inap ulang dalam 7 hari, diagnosis primer sama','kambuh, atau satu episode dipecah',r.readmit7SameDx,ip,'Konteks, dengan angka nasional per diagnosis']
+  ].map(x=>`<tr><td>${esc(x[0])}${x[1]?`<span class="sm">${esc(x[1])}</span>`:''}</td><td class="r num">${dots(x[2])}</td><td class="r num">${per(x[2],x[3])}</td><td>${esc(x[4])}</td></tr>`).join('');
+}
+function renderDxEval(e){
+  $('dxPanel').hidden=!e; if(!e) return;
+  $('dxLoad').textContent=pct(e.workload); $('dxSeeds').textContent=e.seeds;
+  const pick=e.results.filter(x=>x.chronic_share===0.1||x.chronic_share===0&&x.level>=3);
+  $('dxRows').innerHTML=pick.map(x=>`<tr><td><b>L${x.level}</b></td><td class="r num">${pct(x.chronic_share)}</td>
+    <td class="r num">${pct(x.before.recall)} → ${pct(x.after.recall)}</td>
+    <td class="r num">${x.chronic_share?pct(x.before.chronic_in_queue)+' → '+pct(x.after.chronic_in_queue):'-'}</td></tr>`).join('');
 }
 function drawRobust(){
   if(S.route!=='robust'||!S.rb) return;

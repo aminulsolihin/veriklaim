@@ -14,6 +14,8 @@ import re
 from datetime import date
 from typing import Callable, Optional
 
+from . import baseline
+
 NEEDED = ["KODE_RS", "KODE_TARIF", "ADMISSION_DATE", "INACBG", "TARIF_RS", "LOS", "SEP", "NOKARTU"]
 KIND_NAMES = {"SR": "Special Prosthesis", "SD": "Special Drug"}
 
@@ -92,11 +94,14 @@ def _clip(value: str, n: int) -> str:
 
 
 def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str]) -> dict:
-    """Return {"rows": [...], "total", "no_topup", "no_ref", "bad", "dup"}. `bad` includes the `dup` rows
-    (a SEP seen earlier in the file; the first one is kept).
+    """Return {"rows": [...], "episodes": [...], "total", "no_topup", "no_ref", "bad", "dup"}. `bad` includes
+    the `dup` rows (a SEP seen earlier in the file; the first one is kept).
 
     `refs` maps a Special CMG code to {"kind", "description", "price"}. Only claims
     whose Special Prosthesis or Special Drug code has a reference price are kept.
+
+    `episodes` holds a light record (card token, stay, primary diagnosis, hospital) of every claim in the file,
+    with or without a top-up, whose card also has a kept claim; episodes.py checks them for overlapping stays.
     """
     lines = [ln for ln in (text or "").replace("\r", "").split("\n") if ln.strip()]
     if len(lines) < 2:
@@ -123,6 +128,7 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
     rows: list[dict] = []
     no_topup = no_ref = bad = dup = 0
     seen: set[str] = set()
+    cards: set[str] = set()   # raw card numbers of kept claims; compared here only, never stored
     for line in lines[1:]:
         c = line.split("\t")
         sr = norm_code(g(c, "IN_SR")) or norm_code(g(c, "SR"))
@@ -149,6 +155,8 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
             dup += 1
             continue
         seen.add(sep)
+        if g(c, "NOKARTU"):
+            cards.add(g(c, "NOKARTU"))
         rows.append({
             "sep": _clip(sep, 40),
             "kode_rs": _clip(g(c, "KODE_RS"), 20),
@@ -173,4 +181,35 @@ def parse_eklaim(text: str, refs: dict[str, dict], tokenise: Callable[[str], str
             "card_token": tokenise(g(c, "NOKARTU")),
             "ref_price": int(ref["price"]),
         })
-    return {"rows": rows, "total": len(lines) - 1, "no_topup": no_topup, "no_ref": no_ref, "bad": bad + dup, "dup": dup}
+    return {"rows": rows, "episodes": _episodes(lines, g, cards, tokenise), "total": len(lines) - 1,
+            "no_topup": no_topup, "no_ref": no_ref, "bad": bad + dup, "dup": dup}
+
+
+def _episodes(lines: list[str], g: Callable, cards: set[str], tokenise: Callable[[str], str]) -> list[dict]:
+    """Second pass: every claim (first row per SEP) whose card has a kept top-up claim."""
+    out: list[dict] = []
+    if not cards:
+        return out
+    seen: set[str] = set()
+    for line in lines[1:]:
+        c = line.split("\t")
+        card = g(c, "NOKARTU")
+        sep = g(c, "SEP")
+        if card not in cards or not sep or sep in seen:
+            continue
+        adm = parse_day(g(c, "ADMISSION_DATE"))
+        if adm is None:
+            continue
+        seen.add(sep)
+        los = min(100_000, max(0, int(to_number(g(c, "LOS")))))
+        inacbg = _clip(g(c, "INACBG"), 20)
+        inpatient = baseline.is_inpatient(inacbg, los)
+        dis = parse_day(g(c, "DISCHARGE_DATE"))
+        dis = max(adm, dis if dis is not None else adm + los) if inpatient else adm
+        out.append({
+            "sep": _clip(sep, 40), "card_token": tokenise(card), "adm_day": adm, "dis_day": dis,
+            "inpatient": inpatient, "dx3": baseline.primary_dx(g(c, "DIAGLIST")), "kode_rs": _clip(g(c, "KODE_RS"), 20),
+            "adm_date": _clip(g(c, "ADMISSION_DATE"), 20), "dis_date": _clip(g(c, "DISCHARGE_DATE"), 20),
+            "topup": bool(norm_code(g(c, "IN_SR")) or norm_code(g(c, "SR")) or norm_code(g(c, "IN_SD")) or norm_code(g(c, "SD"))),
+        })
+    return out

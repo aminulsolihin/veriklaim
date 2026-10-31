@@ -94,6 +94,10 @@ class Batch(Base):
     labelled: Mapped[bool] = mapped_column(Boolean, default=False)  # synthetic sample with injected-pattern labels
     # None: a team batch. A username: the private batch of one judge-mode guest.
     owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    # cross-batch history (see services.annotate_history)
+    token_key: Mapped[str] = mapped_column(String(16), default="")  # which SECRET_KEY made the card tokens
+    hist_ignored: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # earlier batches treated as re-exports
+    hist_key_skipped: Mapped[int] = mapped_column(Integer, default=0)  # earlier batches whose card tokens differ
 
 
 class Claim(Base):
@@ -129,8 +133,22 @@ class Claim(Base):
     los_median: Mapped[float] = mapped_column(Float)
     los_ratio: Mapped[float] = mapped_column(Float)
     repeat_n: Mapped[int] = mapped_column(Integer)
+    # national norm for the primary diagnosis (baseline.py); 0 / None when the diagnosis has none
+    dx3: Mapped[str] = mapped_column(String(8), default="")
+    repeat_exp: Mapped[float] = mapped_column(Float, default=0.0)   # repeats a patient with this diagnosis normally has
+    los_nat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # national median stay for the diagnosis
     vol_n: Mapped[int] = mapped_column(Integer)
     vol_ratio: Mapped[float] = mapped_column(Float)
+    # cross-batch history, worked out at upload against earlier batches of the same workspace
+    hist_batch_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # earliest batch with the same SEP
+    hist_sep_n: Mapped[int] = mapped_column(Integer, default=0)      # earlier batches holding the same SEP
+    hist_repeat_n: Mapped[int] = mapped_column(Integer, default=0)   # same card, same top-up, 90 days, earlier batches
+    # record rules (episodes.py): stays of the same card that overlap, in this file or earlier batches
+    overlap_n: Mapped[int] = mapped_column(Integer, default=0)
+    overlap_with: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    readmit_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # days since a same-diagnosis stay ended
+    readmit_with: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    readmit_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # national rate for the diagnosis
     # model output
     score: Mapped[float] = mapped_column(Float)
     rank: Mapped[int] = mapped_column(Integer, index=True)
@@ -247,7 +265,14 @@ class AuditLog(Base):
 def add_missing_columns() -> None:
     """create_all does not add columns to an existing table. Add the few columns that later
     versions introduced, so a database made by an earlier version keeps working."""
-    added = {"claims": {"rs_response": "TEXT DEFAULT ''"}, "batches": {"owner": "VARCHAR(64)"}}
+    added = {
+        "claims": {"rs_response": "TEXT DEFAULT ''", "hist_batch_id": "INTEGER", "hist_sep_n": "INTEGER DEFAULT 0",
+                   "hist_repeat_n": "INTEGER DEFAULT 0", "dx3": "VARCHAR(8) DEFAULT ''",
+                   "repeat_exp": "FLOAT DEFAULT 0", "los_nat": "FLOAT", "overlap_n": "INTEGER DEFAULT 0",
+                   "overlap_with": "JSON", "readmit_days": "INTEGER", "readmit_with": "JSON", "readmit_rate": "FLOAT"},
+        "batches": {"owner": "VARCHAR(64)", "token_key": "VARCHAR(16) DEFAULT ''", "hist_ignored": "JSON",
+                    "hist_key_skipped": "INTEGER DEFAULT 0"},
+    }
     insp = inspect(engine)
     with engine.begin() as conn:
         tables = set(insp.get_table_names())

@@ -328,6 +328,7 @@
       <div class="btnrow">
         <button type="submit" class="btn" id="upBtn">Unggah dan saring</button>
         <a class="btn ghost" id="upSample" href="/assets/sample/veriklaim-sample-eklaim.txt" download>Unduh berkas contoh</a>
+        <a class="btn ghost" id="upFollow" href="/assets/sample/veriklaim-sample-lanjutan.txt" download title="Bulan berikutnya dari berkas contoh, dengan 4 SEP yang diajukan ulang">Unduh berkas lanjutan</a>
       </div>
       <p class="msg" id="upMsg" role="status"></p>
     </form>
@@ -408,8 +409,32 @@
   <section id="view-robust" class="stack" hidden>
     <div class="mast"><div>
       <h1>Seberapa tahan penyaringan pada data yang lebih sulit?</h1>
-      <p class="sub">Sampel 80 klaim sengaja dibuat bersih. Di sini model diuji pada <span id="rbN">2.000</span> klaim sintetis yang memuat pengulang yang sah, dan waktu prosesnya diukur pada berkas besar. Semua data sintetis; ini bukan akurasi pada klaim riil.</p>
+      <p class="sub">Sampel 80 klaim sengaja dibuat bersih. Di sini aturan catatan diukur pada data riil (Data Sampel BPJS Kesehatan), model diuji pada <span id="rbN">2.000</span> klaim sintetis yang memuat pengulang yang sah, dan waktu prosesnya diukur pada berkas besar.</p>
     </div></div>
+
+    <section class="panel" id="rdPanel" hidden>
+      <header><h2>Aturan catatan pada data riil</h2></header>
+      <p class="lede" id="rdLede"></p>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Pola</th><th class="r">Jumlah</th><th class="r">Per 10.000</th><th>Yang dilakukan VeriKlaim</th></tr></thead>
+          <tbody id="rdRows"></tbody>
+        </table>
+      </div>
+      <p class="note">Data sampel sudah dianonimkan oleh BPJS Kesehatan dan bisa saja diubah sedikit, jadi angka ini adalah laju pola, bukan temuan kecurangan. Aturan yang sama dipakai pada berkas E-Klaim; hitungannya dibuat ulang dengan <span class="num">tools/build_realdata_eval.py</span>, dan hanya hitungan yang keluar dari basis data lokal.</p>
+    </section>
+
+    <section class="panel" id="dxPanel" hidden>
+      <header><h2>Norma nasional diagnosis: pasien kronis tidak memenuhi antrean</h2></header>
+      <p class="lede">Pasien talasemia mendapat obat kelasi besi setiap tiga sampai enam minggu. Tanpa norma per diagnosis, pengulangan itu terbaca seperti tagihan berulang. Data sintetis yang sama disaring dua kali, tanpa dan dengan norma dari data sampel BPJS, pada beban pemeriksaan <span id="dxLoad">5%</span>.</p>
+      <div class="tblwrap">
+        <table>
+          <thead><tr><th>Pola bermasalah</th><th class="r">Klaim talasemia di berkas</th><th class="r">Rekal: tanpa → dengan norma</th><th class="r">Antrean berisi talasemia: tanpa → dengan</th></tr></thead>
+          <tbody id="dxRows"></tbody>
+        </table>
+      </div>
+      <p class="note">Tanpa pasien kronis, norma sedikit menurunkan rekal pada L3 dan L4, karena pasien infark miokard diharapkan punya sekitar 0,25 kunjungan ulang. Rata-rata <span id="dxSeeds">10</span> seed; <span class="num">python tools/eval_dx_baseline.py</span>.</p>
+    </section>
 
     <section class="panel chartcard">
       <header><h2>Pola bermasalah yang masuk antrean, menurut beban pemeriksaan</h2></header>

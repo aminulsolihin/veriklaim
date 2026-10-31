@@ -213,6 +213,7 @@ input[type=range]{width:100%;accent-color:#000;margin:0;height:28px}
 .vhead.st-both{background:#000;color:#fff}
 .vhead.st-rule{background:var(--butter)}
 .vhead.st-model{background:var(--mint)}
+.vhead.st-hist{background:#fff;box-shadow:inset 0 0 0 2px var(--ink)}
 .vhead .idline{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
 .vhead .idline .num{font-family:var(--f-id);font-size:14px;font-weight:500;overflow-wrap:anywhere}
 .vhead .verdict{font-weight:800;font-size:19px;line-height:1.25;letter-spacing:-.025em}
