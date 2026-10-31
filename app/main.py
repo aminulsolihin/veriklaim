@@ -17,11 +17,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import ai_judge, coding, db as db_module, eklaim, scoring, services
+from . import ai_judge, baseline, coding, db as db_module, eklaim, scoring, services
 from .config import settings
 from .db import AuditLog, Base, Batch, Claim, CodingBatch, CodingClaim, Feedback, ReferencePrice, SessionLocal, User, engine, get_db, iso, utcnow
 from .security import DUMMY_HASH, LoginLimiter, client_ip, login_limiter, verify_password
@@ -133,18 +133,35 @@ def user_out(u: User) -> dict:
     return out
 
 
+def in_queue(b: Batch, thr: Optional[int] = None, k: Optional[int] = None):
+    """The review queue: the bill rule, the top k by anomaly score, every SEP already submitted in an earlier
+    batch, and every stay that overlaps another stay of the same card. The last two do not depend on the settings."""
+    thr = b.threshold_pct if thr is None else thr
+    return or_(Claim.rank <= (b.top_k if k is None else k), Claim.cover * 100 < thr, Claim.hist_batch_id.is_not(None),
+               Claim.overlap_n > 0)
+
+
 def batch_out(b: Batch, db: Session) -> dict:
-    flagged = or_(Claim.rank <= b.top_k, Claim.cover * 100 < b.threshold_pct)
     counts = db.execute(
         select(func.count(), func.count(Claim.review_status))
-        .where(Claim.batch_id == b.id, flagged)
+        .where(Claim.batch_id == b.id, in_queue(b))
     ).one()
+    hist = db.execute(
+        select(func.count(Claim.hist_batch_id), func.coalesce(func.sum(case((Claim.hist_repeat_n > 0, 1), else_=0)), 0),
+               func.coalesce(func.sum(case((Claim.overlap_n > 0, 1), else_=0)), 0), func.count(Claim.readmit_days))
+        .where(Claim.batch_id == b.id)
+    ).one()
+    ignored = list(b.hist_ignored or [])
+    names = dict(db.execute(select(Batch.id, Batch.name).where(Batch.id.in_(ignored))).all()) if ignored else {}
     return {
         "id": b.id, "name": b.name, "filename": b.filename, "uploadedBy": b.uploaded_by, "uploadedAt": iso(b.uploaded_at),
         "rowsTotal": b.rows_total, "rowsScreened": b.rows_screened, "noTopup": b.skipped_no_topup,
         "noRef": b.skipped_no_ref, "bad": b.skipped_bad, "truncated": b.truncated,
         "thresholdPct": b.threshold_pct, "topK": b.top_k, "maxTopK": scoring.max_top_k(b.rows_screened),
         "baseScore": b.base_score, "labelled": b.labelled, "own": b.owner is not None, "flagged": counts[0], "reviewed": counts[1],
+        "histSep": hist[0], "histCard": int(hist[1] or 0), "histKeySkipped": b.hist_key_skipped or 0,
+        "overlap": int(hist[2] or 0), "readmit": hist[3],
+        "histReexport": [{"id": i, "name": names.get(i)} for i in ignored],
     }
 
 
@@ -161,12 +178,16 @@ def claim_out(c: Claim, full: bool = False) -> dict:
         "admTxt": c.adm_date, "disTxt": c.dis_date, "cbg": c.inacbg, "code": c.cmg_code, "final": c.cmg_final,
         "kind": c.cmg_kind, "item": c.cmg_desc, "topup": c.topup, "tarifRs": c.tarif_rs, "ref": c.ref_price,
         "cover": c.cover, "los": c.los, "losMed": c.los_median, "rep": c.repeat_n, "volN": c.vol_n,
+        "dx": c.dx3 or "", "repExp": c.repeat_exp or 0.0, "losNat": c.los_nat,
+        "overlapN": c.overlap_n or 0, "readmitDays": c.readmit_days,
         "vol": c.vol_ratio, "score": c.score, "rank": c.rank, "phi": c.phi, "label": c.label,
+        "histBatch": c.hist_batch_id, "histSepN": c.hist_sep_n or 0, "histRep": c.hist_repeat_n or 0,
         "review": review_out(c),
     }
     if full:
         out.update({"cbgDesc": c.inacbg_desc, "diag": c.diag, "proc": c.proc, "total": c.total_tarif,
-                    "tarifCbg": c.tarif_inacbg, "token": c.card_token})
+                    "tarifCbg": c.tarif_inacbg, "token": c.card_token, "overlapWith": c.overlap_with or [],
+                    "readmitWith": c.readmit_with, "readmitRate": c.readmit_rate})
     return out
 
 
@@ -192,6 +213,7 @@ def config():
         "maxClaims": settings.max_claims,
         "minClaims": settings.min_claims,
         "features": scoring.FEATURES,
+        "dxBaseline": baseline.source(),
         "codingFeatures": coding.FEATURES,
         "judgeMode": settings.judge_mode,
         "guestHours": settings.guest_hours,
@@ -202,12 +224,19 @@ def config():
 
 @lru_cache(maxsize=1)
 def _robustness() -> dict:
-    return json.loads((settings.data_dir / "robustness.json").read_text(encoding="utf-8"))
+    out = json.loads((settings.data_dir / "robustness.json").read_text(encoding="utf-8"))
+    for key, name in (("realData", "realdata.json"), ("dxEval", "dx_eval.json")):
+        try:
+            out[key] = json.loads((settings.data_dir / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            out[key] = None
+    return out
 
 
 @app.get("/api/robustness")
 def robustness(user: User = Depends(current_user)):
-    """Results of tools/stress_test.py and tools/benchmark.py (synthetic data), shown on the Ketahanan page."""
+    """Results of tools/stress_test.py and tools/benchmark.py (synthetic data), the record rules on the BPJS sample
+    data (tools/build_realdata_eval.py) and the national-norm A/B (tools/eval_dx_baseline.py), for the Ketahanan page."""
     try:
         return _robustness()
     except (OSError, ValueError):
@@ -446,20 +475,29 @@ def batch_export(
                 "BILL_TO_REFERENCE", "LOS", "LOS_MEDIAN_SAME_CBG", "SAME_TOPUP_SAME_CARD_90D", "VOLUME_VS_PEERS",
                 "ANOMALY_SCORE", "RANK", "BILL_RULE", "ANOMALY_LAYER", "MAIN_DRIVER", "PHI_BILL", "PHI_LOS",
                 "PHI_REPEAT", "PHI_VOLUME", "CARD_TOKEN", "REVIEW_STATUS", "REVIEW_NOTE", "RS_RESPONSE", "REVIEWED_BY",
-                "REVIEWED_AT"])
+                "REVIEWED_AT", "SAME_SEP_EARLIER_BATCH", "SAME_SEP_EARLIER_BATCHES_N", "SAME_TOPUP_SAME_CARD_90D_EARLIER_BATCHES",
+                "HISTORY_RULE", "PRIMARY_DX", "REPEAT_EXPECTED_FOR_DX", "LOS_NATIONAL_MEDIAN_DX",
+                "OVERLAPPING_STAYS_SAME_CARD", "OVERLAP_RULE", "OVERLAPPING_SEPS", "READMITTED_DAYS_AFTER_SAME_DX_STAY",
+                "READMIT_NATIONAL_RATE_DX"])
     n = 0
     for c in claims:
-        rule, model = c.cover * 100 < thr - 1e-9, c.rank <= k
-        if view == "flagged" and not (rule or model):
+        rule, model, hist = c.cover * 100 < thr - 1e-9, c.rank <= k, c.hist_batch_id is not None
+        overlap = (c.overlap_n or 0) > 0
+        if view == "flagged" and not (rule or model or hist or overlap):
             continue
         phi = c.phi or [None] * 4
-        driver = drivers[max(range(4), key=lambda i: phi[i])] if (model and c.phi) else ("Tagihan RS" if rule else "")
+        driver = (drivers[max(range(4), key=lambda i: phi[i])] if (model and c.phi)
+                  else "Tagihan RS" if rule else "SEP sudah diajukan" if hist else "Rawat tumpang tindih" if overlap else "")
         w.writerow([_csv_cell(v) for v in [
             c.sep, c.kode_rs, c.kelas_rs, c.kode_tarif, c.inacbg, c.cmg_final or c.cmg_code, c.tarif_rs, c.ref_price,
             "%.3f" % c.cover, c.los, "%g" % c.los_median, c.repeat_n, "%.3f" % c.vol_ratio, "%.4f" % c.score, c.rank,
             "flagged" if rule else "pass", "flagged" if model else "pass", driver,
             *["" if x is None else "%.4f" % x for x in phi],
             c.card_token, c.review_status or "", c.review_note, c.rs_response or "", c.reviewed_by or "", iso(c.reviewed_at) or "",
+            c.hist_batch_id or "", c.hist_sep_n or 0, c.hist_repeat_n or 0, "flagged" if hist else "pass",
+            c.dx3 or "", "%g" % (c.repeat_exp or 0.0), "" if c.los_nat is None else "%g" % c.los_nat,
+            c.overlap_n or 0, "flagged" if overlap else "pass", " ".join(o["sep"] for o in c.overlap_with or []),
+            "" if c.readmit_days is None else c.readmit_days, "" if c.readmit_rate is None else "%.4f" % c.readmit_rate,
         ]])
         n += 1
     services.audit(db, user, "export", batch_id=batch.id, detail={"view": view, "rows": n, "thresholdPct": thr, "topK": k})
@@ -484,7 +522,9 @@ def get_claim(claim_id: int, db: Session, user: User) -> Claim:
 def claim_detail(claim_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     claim = get_claim(claim_id, db, user)
     services.ensure_phi(db, claim)
-    return claim_out(claim, full=True)
+    out = claim_out(claim, full=True)
+    out["history"] = services.claim_history(db, claim, db.get(Batch, claim.batch_id))
+    return out
 
 
 class ReviewIn(BaseModel):

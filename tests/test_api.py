@@ -157,7 +157,7 @@ def test_upload_rejects_bad_files_with_a_message(verifikator, sample_text):
 
 def test_reference_prices_are_supervisor_only_and_drive_screening(verifikator, supervisor, sample_text):
     refs = verifikator.get("/api/reference-prices").json()
-    assert {r["code"] for r in refs} == {"RR04", "DD01"}
+    assert {r["code"] for r in refs} == {"RR04", "DD01", "DD02"}
     body = {"kind": "SR", "description": "Test implant", "price": 1000, "source": "test"}
     assert verifikator.put("/api/reference-prices/ZZ99", json=body).status_code == 403
     assert supervisor.put("/api/reference-prices/bad-code", json=body).status_code == 400
@@ -221,6 +221,13 @@ def test_robustness_requires_login_and_matches_the_published_figures(server, ver
         assert len(lv["recall"]) == len(lv["precision"]) == len(lv["legitInQueue"]) == n
         assert all(0 <= v <= 1 for v in lv["recall"])
         assert lv["recall"] == sorted(lv["recall"])  # more workload never lowers recall
+    # the record rules on the BPJS sample data, and the national-norm A/B
+    rd = d["realData"]
+    assert rd["inpatientStays"] > 100_000 and 0 < rd["overlap"] < rd["sameDayTransfer"]
+    assert rd["identicalStay"] <= rd["overlap"] and rd["overlapPrevOtherDistrict"] <= rd["overlap"]
+    ev = {(x["level"], x["chronic_share"]): x for x in d["dxEval"]["results"]}
+    assert all(x["after"]["chronic_in_queue"] < x["before"]["chronic_in_queue"]
+               for (lvl, share), x in ev.items() if share > 0)
 
 
 def test_robustness_is_open_to_judge_sessions(server):

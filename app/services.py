@@ -4,14 +4,15 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from collections import defaultdict
 from datetime import timedelta
-from typing import Optional
+from typing import Iterable, Optional
 
 import numpy as np
 from sqlalchemy import delete, func, inspect as sa_inspect, select
 from sqlalchemy.orm import Session
 
-from . import coding, eklaim, scoring
+from . import baseline, coding, eklaim, episodes, scoring
 from .config import settings
 from .db import AuditLog, Batch, Claim, CodingBatch, CodingClaim, ReferencePrice, User, utcnow
 from .security import card_token, hash_password, verify_password
@@ -24,7 +25,11 @@ DEFAULT_REFERENCE_PRICES = [
      "source": "Contoh ilustratif (produksi: e-Katalog LKPP)"},
     {"code": "DD01", "kind": "SD", "description": "Streptokinase", "price": 4_000_000,
      "source": "Contoh ilustratif (produksi: e-Fornas / e-Katalog)"},
+    {"code": "DD02", "kind": "SD", "description": "Deferiprone", "price": 2_500_000,
+     "source": "Contoh ilustratif (produksi: e-Fornas / e-Katalog)"},
 ]
+# Defaults added after the first release: seeded into existing databases too, unless a supervisor deleted them.
+_ADDED_LATER = {"DD02"}
 # Source strings written by earlier versions, refreshed on start-up when nobody has edited the row.
 _OLD_SOURCES = {
     "RR04": "Placeholder (production: LKPP e-Katalog)",
@@ -67,13 +72,15 @@ def ingest(db: Session, text: str, *, name: str, filename: str, user: Optional[U
     if truncated:
         rows = rows[: settings.max_claims]
     model = scoring.screen(rows)
+    hist = annotate_history(db, rows, owner)
+    records = episodes.annotate(rows, parsed["episodes"], hist["episodes"])
 
     batch = Batch(
         name=name[:160], filename=filename[:200], uploaded_by=user.username if user else "system",
         rows_total=parsed["total"], rows_screened=len(rows), skipped_no_topup=parsed["no_topup"],
         skipped_no_ref=parsed["no_ref"], skipped_bad=parsed["bad"], truncated=truncated,
         threshold_pct=100, top_k=scoring.default_top_k(len(rows)), base_score=model.base, labelled=bool(labels),
-        owner=owner,
+        owner=owner, token_key=hist["key"], hist_ignored=hist["ignored"] or None, hist_key_skipped=hist["key_skipped"],
     )
     db.add(batch)
     db.flush()
@@ -84,15 +91,153 @@ def ingest(db: Session, text: str, *, name: str, filename: str, user: Optional[U
         "name": batch.name, "rows": parsed["total"], "screened": len(rows),
         "no_topup": parsed["no_topup"], "no_reference_price": parsed["no_ref"], "unreadable": parsed["bad"],
         "duplicate_sep": parsed["dup"],
+        "history": {"same_sep": hist["same_sep"], "same_card": hist["same_card"], "reexport_of": hist["ignored"],
+                    "key_skipped": hist["key_skipped"]},
+        "records": {"overlapping_stay": records["overlap"], "readmission_same_dx": records["readmit"]},
     })
     db.commit()
     scoring.remember(batch.id, model)
     return batch
 
 
+# ---------- cross-batch history (repeat billing across uploads) ----------
+
+REEXPORT_SHARE = 0.5   # an earlier batch sharing at least this share of SEPs is the same export uploaded again
+_IN_CHUNK = 500        # values per IN (...) list
+
+
+def key_mark() -> str:
+    """Identifies the key that made the card tokens. Tokens made under another SECRET_KEY never match, so
+    batches with a different mark are left out of the card comparison and counted, instead of silently missing."""
+    return card_token("veriklaim:key-check")
+
+
+def _chunks(values: Iterable) -> Iterable[list]:
+    values = list(values)
+    for i in range(0, len(values), _IN_CHUNK):
+        yield values[i:i + _IN_CHUNK]
+
+
+def _earlier(owner: Optional[str], before_id: Optional[int], ignored: Iterable[int]) -> list:
+    """Batches of the same workspace (the team, or one guest) that count as history."""
+    conds = [Batch.owner.is_(None) if owner is None else Batch.owner == owner]
+    if before_id is not None:
+        conds.append(Batch.id < before_id)
+    ignored = list(ignored or ())
+    if ignored:
+        conds.append(Batch.id.not_in(ignored))
+    return conds
+
+
+def annotate_history(db: Session, rows: list[dict], owner: Optional[str]) -> dict:
+    """Compare a new file with the earlier batches of the same workspace, before it is stored.
+
+    Sets on each row: hist_batch_id (earliest earlier batch holding the same SEP), hist_sep_n (how many earlier
+    batches hold it) and hist_repeat_n (claims in earlier batches with the same card token and top-up code within
+    the repeat window; other SEPs only). One SEP is one episode of care, so a SEP that was already submitted is a
+    request to check for double payment and joins the queue. The card count is context and does not.
+
+    An earlier batch that shares at least REEXPORT_SHARE of the smaller file's SEPs is taken as the same export
+    uploaded again (or a month that contains an earlier week) and is ignored, so a re-upload does not put every
+    claim in the queue. The judge-mode template (owner 'system:...') has no history.
+
+    Also returns out["episodes"]: the earlier claims with the same card tokens as episodes, for the overlap and
+    readmission rules in episodes.py."""
+    key = key_mark()
+    for r in rows:
+        r["hist_batch_id"], r["hist_sep_n"], r["hist_repeat_n"] = None, 0, 0
+    out = {"key": key, "ignored": [], "key_skipped": 0, "same_sep": 0, "same_card": 0, "episodes": []}
+    if (owner is not None and owner.startswith("system:")) or not rows:
+        return out
+    earlier = {b.id: b for b in db.execute(
+        select(Batch.id, Batch.rows_screened, Batch.token_key).where(*_earlier(owner, None, ()))).all()}
+    if not earlier:
+        return out
+
+    seps = {r["sep"] for r in rows}
+    hits: dict[str, set] = defaultdict(set)
+    for chunk in _chunks(seps):
+        for sep, bid in db.execute(
+            select(Claim.sep, Claim.batch_id).join(Batch, Batch.id == Claim.batch_id)
+            .where(*_earlier(owner, None, ()), Claim.sep.in_(chunk))
+        ):
+            hits[sep].add(bid)
+    shared: dict[int, int] = defaultdict(int)
+    for bids in hits.values():
+        for bid in bids:
+            shared[bid] += 1
+    ignored = sorted(bid for bid, n in shared.items()
+                     if n >= REEXPORT_SHARE * max(1, min(len(seps), earlier[bid].rows_screened or 0)))
+    out["ignored"] = ignored
+    for r in rows:
+        bids = hits.get(r["sep"], set()).difference(ignored)
+        if bids:
+            r["hist_batch_id"], r["hist_sep_n"] = min(bids), len(bids)
+            out["same_sep"] += 1
+
+    live = [b for bid, b in earlier.items() if bid not in ignored]
+    out["key_skipped"] = sum(1 for b in live if b.token_key != key)
+    tokens = {r["card_token"] for r in rows if r["card_token"]}
+    if tokens and any(b.token_key == key for b in live):
+        prior: dict[tuple, list] = defaultdict(list)
+        for chunk in _chunks(tokens):
+            for c in db.execute(
+                select(Claim.sep, Claim.card_token, Claim.cmg_code, Claim.adm_day, Claim.dis_date, Claim.los,
+                       Claim.inacbg, Claim.dx3, Claim.diag, Claim.kode_rs, Claim.adm_date, Claim.batch_id)
+                .join(Batch, Batch.id == Claim.batch_id)
+                .where(*_earlier(owner, None, ignored), Batch.token_key == key, Claim.card_token.in_(chunk))
+            ):
+                prior[(c.card_token, c.cmg_code)].append((c.sep, c.adm_day))
+                out["episodes"].append(_stored_episode(c))
+        window = scoring.REPEAT_WINDOW_DAYS
+        for r in rows:
+            if not r["card_token"]:
+                continue
+            seen = {sep for sep, day in prior.get((r["card_token"], r["cmg_code"]), ())
+                    if sep != r["sep"] and abs(day - r["adm_day"]) <= window}
+            r["hist_repeat_n"] = len(seen)
+            out["same_card"] += 1 if seen else 0
+    return out
+
+
+def _stored_episode(c) -> dict:
+    """A stored claim as an episode (episodes.py). Claims stored before dx3 existed get it from the diagnosis list."""
+    inpatient = baseline.is_inpatient(c.inacbg, c.los)
+    dis = eklaim.parse_day(c.dis_date)
+    dis = max(c.adm_day, dis if dis is not None else c.adm_day + c.los) if inpatient else c.adm_day
+    return {"sep": c.sep, "card_token": c.card_token, "adm_day": c.adm_day, "dis_day": dis, "inpatient": inpatient,
+            "dx3": c.dx3 or baseline.primary_dx(c.diag), "kode_rs": c.kode_rs, "adm_date": c.adm_date,
+            "dis_date": c.dis_date, "topup": True, "batch": c.batch_id}
+
+
+def claim_history(db: Session, claim: Claim, batch: Batch, limit: int = 10) -> dict:
+    """The earlier claims behind a claim's history counts, read live: since the upload an earlier batch may
+    have been deleted, or its claim reviewed."""
+    def item(c: Claim, name: str) -> dict:
+        return {"batchId": c.batch_id, "batchName": name, "sep": c.sep, "admTxt": c.adm_date, "disTxt": c.dis_date,
+                "rs": c.kode_rs, "tarifRs": c.tarif_rs, "topup": c.topup, "code": c.cmg_code, "review": c.review_status}
+
+    conds = _earlier(batch.owner, batch.id, batch.hist_ignored or ())
+    same_sep = [item(c, name) for c, name in db.execute(
+        select(Claim, Batch.name).join(Batch, Batch.id == Claim.batch_id)
+        .where(*conds, Claim.sep == claim.sep).order_by(Claim.batch_id).limit(limit)
+    )]
+    same_card = []
+    if claim.card_token and batch.token_key:
+        window = scoring.REPEAT_WINDOW_DAYS
+        same_card = [item(c, name) for c, name in db.execute(
+            select(Claim, Batch.name).join(Batch, Batch.id == Claim.batch_id)
+            .where(*conds, Batch.token_key == batch.token_key, Claim.card_token == claim.card_token,
+                   Claim.cmg_code == claim.cmg_code, Claim.sep != claim.sep,
+                   Claim.adm_day >= claim.adm_day - window, Claim.adm_day <= claim.adm_day + window)
+            .order_by(Claim.adm_day).limit(limit)
+        )]
+    return {"sameSep": same_sep, "sameCard": same_card, "removed": claim.hist_batch_id is not None and not same_sep}
+
+
 def _matrix(db: Session, batch_id: int) -> np.ndarray:
     rows = db.execute(
-        select(Claim.cover, Claim.los_ratio, Claim.repeat_n, Claim.vol_ratio)
+        select(Claim.cover, Claim.los_ratio, Claim.repeat_n, Claim.vol_ratio, Claim.repeat_exp)
         .where(Claim.batch_id == batch_id).order_by(Claim.pos)
     ).all()
     return np.array([scoring.feature_vector(*r) for r in rows], dtype=float)
@@ -134,22 +279,30 @@ def seed(db: Session) -> None:
     if db.scalar(select(func.count()).select_from(ReferencePrice)) == 0:
         db.add_all([ReferencePrice(**r) for r in DEFAULT_REFERENCE_PRICES])
     else:
+        deleted = set()
+        for detail in db.scalars(select(AuditLog.detail).where(AuditLog.action == "reference_price_delete")):
+            try:
+                deleted.add(json.loads(detail or "{}").get("code"))
+            except ValueError:
+                pass
         for r in DEFAULT_REFERENCE_PRICES:
             row = db.get(ReferencePrice, r["code"])
-            if row is not None and row.updated_by == "system" and row.source == _OLD_SOURCES.get(r["code"]):
+            if row is None and r["code"] in _ADDED_LATER and r["code"] not in deleted:
+                db.add(ReferencePrice(**r))
+            elif row is not None and row.updated_by == "system" and row.source == _OLD_SOURCES.get(r["code"]):
                 row.source = r["source"]
     db.commit()
 
     team_batches = db.scalar(select(func.count()).select_from(Batch).where(Batch.owner.is_(None)))
     if settings.seed_sample and team_batches == 0:
-        clone_batch(db, _template_batch(db), owner=None, uploaded_by="system")
+        clone_batch(db, _refresh_template(db), owner=None, uploaded_by="system")
         db.commit()
     team_coding = db.scalar(select(func.count()).select_from(CodingBatch).where(CodingBatch.owner.is_(None)))
     if settings.seed_sample and team_coding == 0:
         clone_coding_batch(db, _coding_template(db), owner=None, uploaded_by="system")
         db.commit()
     if settings.judge_mode:
-        _template_batch(db)
+        _refresh_template(db)
         _coding_template(db)
         purge_guests(db)
 
@@ -172,6 +325,33 @@ def _template_batch(db: Session) -> Batch:
         batch = ingest(db, text, name=SAMPLE_NAME, filename=SAMPLE_FILE, user=None, labels=labels,
                        owner="system:template")
     return batch
+
+
+def _refresh_template(db: Session) -> Batch:
+    """Keep the template's card tokens comparable with new uploads. A template made by an earlier version has no
+    key mark: if its tokens still match the sample file under the current key, mark it; otherwise (SECRET_KEY
+    changed) build it again. A template scored before the national diagnosis norms (no primary diagnosis stored)
+    is built again too, so guests see the current features. Guest copies already made keep their own data."""
+    batch = _template_batch(db)
+    claim = db.scalar(select(Claim).where(Claim.batch_id == batch.id).order_by(Claim.pos).limit(1))
+    if claim is not None and not claim.dx3 and claim.diag:
+        delete_batch(db, batch)
+        db.commit()
+        return _template_batch(db)
+    if batch.token_key == key_mark():
+        return batch
+    text = (settings.data_dir / "sample-eklaim.txt").read_text(encoding="utf-8")
+    parsed = eklaim.parse_eklaim(text, reference_map(db), card_token)["rows"]
+    first = next((r for r in parsed if claim is not None and r["sep"] == claim.sep), None)
+    if first is None:  # cannot tell (for example its reference price was deleted): leave it unmarked
+        return batch
+    if first["card_token"] == claim.card_token:
+        batch.token_key = key_mark()
+        db.commit()
+        return batch
+    delete_batch(db, batch)
+    db.commit()
+    return _template_batch(db)
 
 
 def clone_batch(db: Session, source: Batch, *, owner: str, uploaded_by: str) -> Batch:

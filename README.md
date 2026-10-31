@@ -36,7 +36,7 @@ claims that carry such a top-up, and ranks them for review.
 | Area | Capability |
 |---|---|
 | Ingest | Upload an E-Klaim TXT export. Claims are parsed, scored and stored as a batch. |
-| Screening | A bill rule and an Isolation Forest, combined into one review queue. |
+| Screening | A bill rule, an Isolation Forest and record rules (re-billed SEP, overlapping stays), combined into one review queue. |
 | Explanations | Exact Shapley values per claim, with a plain-language reason and the next document to check. |
 | Review workflow | Decisions (confirmed, cleared, documents requested), notes, and the hospital's response, stored per claim. |
 | Monitoring | Flag rate per hospital and per top-up code, to surface systematic bias. |
@@ -79,17 +79,129 @@ tested with a real screen reader (VoiceOver, NVDA).
    four features:
    - bill against reference price (log2 of `cover`)
    - length of stay against the median of the same INA-CBG (log2 ratio)
-   - other claims with the same card token and top-up code within 90 days
+   - other claims with the same card token and top-up code within 90 days, above the number a patient
+     with the same primary diagnosis normally has
    - the hospital's top-up volume against its peers (log2 ratio)
+
+   The second and third features use [national diagnosis norms](#national-diagnosis-norms) when the
+   claim's primary diagnosis has one.
 4. **Explanation.** Exact Shapley values over the four features (all 16 coalitions, with up to 120
    background claims). The four contributions add up to the difference between the claim's score and
    the batch average. The top 60 ranks are explained at upload; the rest when opened.
-5. **Queue.** The union of claims flagged by the bill rule and the top *K* by anomaly score. *K* is a
-   reviewer-capacity setting per batch: it defaults to about 15% of screened claims and is capped at 30%
-   of them, with a maximum of 40.
+5. **Queue.** The union of claims flagged by the bill rule, the top *K* by anomaly score, every claim
+   whose SEP was already submitted in an earlier batch (step 6), and every claim whose stay overlaps another
+   stay of the same card (step 7). *K* is a reviewer-capacity setting per
+   batch: it defaults to about 15% of screened claims and is capped at 30% of them, with a maximum of 40.
+6. **History across batches.** At upload each claim is compared with the earlier batches of the same
+   workspace (the team's, or one judge's own):
+   - *Same SEP.* One SEP is one episode of care, so a SEP that is already in an earlier batch joins the
+     queue whatever the settings, shown as "SEP sudah diajukan" with the earlier claim's amounts and
+     review decision side by side (same amounts: probably resubmitted; different: a correction or a
+     double bill).
+   - *Same card and top-up within 90 days* in an earlier batch is counted and shown on the claim. It does
+     not queue a claim on its own (a second knee is a legitimate repeat) and does not change the model.
+   - *Re-exports are not duplicates.* An earlier batch that shares at least half of the smaller file's SEPs
+     is taken as the same export again (or a month that contains an earlier week) and is left out of the
+     comparison, and the page says so. Without this, uploading a file twice would queue every claim.
+   - Card tokens made under another `SECRET_KEY` cannot match, so such batches (and batches stored before
+     this check existed) are left out of the card comparison and counted on the page; SEPs are still
+     compared.
+7. **Overlapping stays and readmissions** (`app/episodes.py`). Each top-up claim is compared with every
+   other claim of the same card: in the same file, with or without a top-up (the parser keeps a light
+   record of those, and compares raw card numbers only inside the parser), and the stored claims of earlier
+   batches.
+   - *Overlap.* Two stays that share a night, or a same-day claim on a day strictly inside a stay. A
+     patient cannot lie in two beds at once, so at least one of the claims is wrong (a phantom stay, a double
+     bill or a wrong date). Both claims join the queue whatever the settings, shown as "Rawat tumpang tindih"
+     with the other claim's hospital and dates. Admitted on the day the other stay ended is a transfer and
+     does not count.
+   - *Readmission.* Admitted 1 to 7 days after a stay with the same primary diagnosis ended. Shown as
+     context with the national rate for that diagnosis (a relapse, or one episode split in two); it does not
+     queue the claim.
+   [The record rules on real data](#record-rules-on-real-data) shows how often each holds in 5.4 million
+   real hospital visits.
 
 Limits: a file needs at least 20 top-up claims, and at most `MAX_CLAIMS` (default 2,000) are screened.
 Claims whose top-up code has no reference price are skipped and counted on the batch.
+
+### National diagnosis norms
+
+A file can say what is usual inside that file, not what is usual for a diagnosis. Some top-ups go to
+patients who come back by design: iron chelators (DD02 to DD04, DD07 to DD09) to thalassaemia patients
+transfused every few weeks, anti-haemophilia factor (DD06, DD10) to haemophilia patients. Counting their
+repeats like a second hip implant fills the queue with routine care.
+
+`app/data/dx_baseline.json` holds norms per 3-character ICD-10 primary diagnosis and care setting
+(inpatient or outpatient, from the INA-CBG case type), built by `tools/build_dx_baseline.py` from the BPJS
+sample data (FKRTL, 5.36 million hospital visits, 2015 to 2024) in a local knowledge base. Only aggregates
+of at least 30 visits are stored. Examples, other visits by the same patient with the same diagnosis within
+90 days either side:
+
+| Primary diagnosis | Setting | Visits | Other visits within +/-90 days (mean) | Median stay |
+|---|---|---|---|---|
+| D56 thalassaemia | inpatient | 2,581 | 4.4 | 1 day |
+| D66 haemophilia A | outpatient | 1,516 | 19.7 | - |
+| I21 myocardial infarction | inpatient | 4,336 | 0.25 | 4 days |
+| M17 knee arthrosis | inpatient | 487 | 0.16 | 3 days |
+| A41 sepsis | inpatient | 613 | 0.03 | 6 days |
+
+Two uses, both in `scoring.featurize`:
+
+- **Repeats.** The expected number of repeats is the diagnosis's visit rate times the days of the claim's
+  +/-90-day window that the file covers (a one-month file cannot show three months of visits). The
+  feature is the count above that, never below zero.
+- **Stay.** The INA-CBG group's median in the file is blended with the national median for the diagnosis,
+  which counts as five claims. A large group barely moves; a group of two no longer sets its own norm.
+
+A claim with no diagnosis in the table is screened as before, and so are batches stored before this
+change. The claim page shows the norm next to each number, the CSV export has it in three extra columns,
+and the AI second opinion is told to read repeats against it.
+
+`tools/eval_dx_baseline.py` adds thalassaemia patients to the stress-test data (a claim every three to six
+weeks, one or two day stays, as the norms show) and screens each file with and without the norms. At a 5%
+review workload, 10 seeds:
+
+| Pattern | Thalassaemia share | Recall before / after | Thalassaemia claims in the queue before / after |
+|---|---|---|---|
+| L1 | 10% | 96.7% / 100% | 50.3% / 18.6% |
+| L2 | 10% | 86.3% / 95.0% | 60.2% / 17.7% |
+| L3 | 10% | 56.2% / 69.4% | 64.1% / 22.9% |
+| L3 | 0% | 85.0% / 82.5% | - |
+| L4 | 0% | 20.0% / 18.1% | - |
+
+With no chronic patients in the file the norms cost a little recall at L3 and L4, because a myocardial
+infarction patient is now expected to have about 0.25 repeats. The data is synthetic; this shows the
+mechanism, not performance on real claims. The norms count visits per diagnosis, not top-up items, and the
+sample data carries no INA-CBG code, so the coding check does not use them yet.
+
+To rebuild: `<knowledge base>\.venv\Scripts\python.exe tools/build_dx_baseline.py --kb <knowledge base>`.
+The script goes through the knowledge base's privacy layer (guarded read-only SQL, small groups
+suppressed). A knowledge base filled before 2026-10-31 holds about 11% of admission dates with day and
+month swapped; run `kb_cli.py repair-dates` there once before building.
+
+### Record rules on real data
+
+The record rules of step 7 were run, in SQL, over every hospital visit in the BPJS sample data (FKRTL,
+2015 to 2024) in the local knowledge base, by `tools/build_realdata_eval.py`. Only counts leave the
+knowledge base. The Ketahanan page shows the same table, read from `app/data/realdata.json`.
+
+| Pattern | Count | Per 10,000 | What VeriKlaim does |
+|---|---|---|---|
+| Inpatient stays | 526,011 | | |
+| Stays that overlap another stay of the same patient (both counted) | 777 | 14.8 | queue |
+| … started before the previous stay ended, in another district | 139 | 2.6 | queue |
+| … identical stays (same admission, discharge and diagnosis) | 24 | 0.5 | queue |
+| Outpatient visits on a day inside an inpatient stay (of 4,836,006 visits) | 313 | 0.6 | queue |
+| Admitted on the day the previous stay ended (referral, transfer) | 6,030 | 114.6 | not flagged |
+| Readmitted within 7 days with the same primary diagnosis | 6,607 | 125.6 | context, with the national rate for the diagnosis |
+
+So the overlap rule would send about 15 in 10,000 inpatient claims to a verifier, and leaves alone the
+transfers that a looser "same patient, same days" rule would catch, which are about eight times as common.
+National 7-day readmission rates differ by diagnosis (heart attack I21 1.9%, chronic kidney disease N18
+5.5%, chemotherapy Z51 13%), which is why the claim page shows the rate next to a readmission instead of
+flagging it. The sample data is anonymised by BPJS Kesehatan and may be perturbed; these are rates of a
+pattern, not findings of fraud. Before the knowledge base's date repair (2026-10-31), 11% of admission
+dates had day and month swapped, which would have produced false overlaps.
 
 ## Upcoding indicators
 
@@ -195,7 +307,7 @@ the API never allows.
 | Health | `GET /healthz` (process only), `GET /readyz` (includes a database check) |
 | Session | `POST /api/login`, `POST /api/logout`, `POST /api/demo-login`, `GET /api/me`, `GET /api/config` |
 | Batches | `GET`/`POST /api/batches`, `GET`/`PATCH`/`DELETE /api/batches/{id}`, `GET /api/batches/{id}/export.csv` |
-| Claims | `GET /api/claims/{id}`, `PUT /api/claims/{id}/review` |
+| Claims | `GET /api/claims/{id}` (includes `history`: earlier claims with the same SEP, or the same card and top-up), `PUT /api/claims/{id}/review` |
 | Reference prices | `GET /api/reference-prices`, `PUT`/`DELETE /api/reference-prices/{code}` |
 | Coding check | `GET`/`POST /api/coding/batches`, `GET`/`PATCH`/`DELETE /api/coding/batches/{id}`, `GET /api/coding/batches/{id}/export.csv`, `GET /api/coding/claims/{id}`, `PUT /api/coding/claims/{id}/review` |
 | Special CMG catalogue | `GET /api/special-cmg` (the 16 codes in Permenkes 26/2021, with whether each has a reference price) |
@@ -213,11 +325,13 @@ pytest                                                                 # SQLite 
 TEST_DATABASE_URL=postgresql://user@localhost/veriklaim_test pytest    # the same suite on Postgres
 ```
 
-The suite has 107 tests: the E-Klaim parser, feature and Shapley computation, the API and its role
+The suite has 153 tests: the E-Klaim parser, the national diagnosis norms, the record rules (overlapping
+stays, readmissions), feature and Shapley computation, the API and its role
 checks, the review workflow, judge-mode isolation and expiry, the robustness endpoint, and the upcoding
 check (reader, indicators, hospital pattern, API, isolation), static accessibility guardrails (markup,
 colour contrast, keyboard path), and input hardening (number formats, absurd values, duplicate SEPs, rate-limit
-key, CSV cells). It passes on SQLite and on Postgres.
+key, CSV cells), and history across batches (re-billed SEPs, re-exports, workspace isolation, a changed
+key). It passes on SQLite and on Postgres.
 
 ## Deployment
 
@@ -291,7 +405,14 @@ revocation before any real use.
 
 ## Evaluation on synthetic data
 
-The bundled sample has 80 claims, 14 of which carry an injected problem pattern. At the default
+The bundled sample has 80 claims, 14 of which carry an injected problem pattern. A second file,
+`veriklaim-sample-lanjutan.txt` ("Unduh berkas lanjutan" on the Berkas page, made by
+`tools/make_followup_sample.py`), is the next month of the same sample: uploaded after it, it puts the 4
+re-billed SEPs in the queue (2 unchanged, 2 with a higher TARIF_RS) and counts 4 card repeats. It also
+holds 2 overlapping stays (one with a claim without a top-up at another hospital in the same file, one
+with the sample's own claim), which join the queue; 1 readmission 3 days after a stay with the same
+diagnosis, shown as context; and 3 thalassaemia patients on deferiprone (DD02) seen four weeks apart, whose
+repeat stays within the national norm and are not queued. At the default
 settings the queue holds 16 claims and contains 13 of the 14 patterns. The bill rule alone finds 7, and
 a random sample of 16 would contain 2.8 on average. The sample is clean by construction, so two scripts
 test harder, larger data. Neither says anything about accuracy on real claims.
@@ -336,16 +457,24 @@ app/
   services.py      ingest, explanations, audit entries, start-up seed
   eklaim.py        E-Klaim TXT reader
   scoring.py       features, Isolation Forest, Shapley values
+  baseline.py      national norms per primary diagnosis (stay, repeat visits, readmissions)
+  episodes.py      record rules: overlapping stays, quick readmissions with the same diagnosis
   coding.py        upcoding indicators: reader, case-group comparison, hospital pattern, features
   db.py            SQLAlchemy models
   security.py      password hashing, card tokens, sign-in limiter
   config.py        settings from environment variables
-  data/            synthetic samples and their labels, robustness figures, Special CMG code list
+  data/            synthetic samples and their labels, robustness figures, Special CMG code list,
+                   national diagnosis norms (dx_baseline.json), record rules on real data (realdata.json),
+                   national-norm A/B (dx_eval.json)
   static/          index.html, assets/styles.css, assets/js/app.js (queue, shared helpers), coding.js (Koding page)
 tests/             parser, model, API and judge-mode tests
 tools/
   make_sample.js   regenerates the synthetic sample (Node)
+  make_followup_sample.py   writes the follow-up month used to show history across batches
   stress_test.py   2,000-claim robustness check with legitimate repeaters
+  build_dx_baseline.py    builds the national diagnosis norms from the BPJS sample data knowledge base
+  eval_dx_baseline.py     A/B of the top-up screen with and without those norms
+  build_realdata_eval.py  measures the record rules on the BPJS sample data knowledge base
   benchmark.py     read-and-score timing on a large synthetic file
   make_coding_sample.py   regenerates the synthetic upcoding sample and its answer key
   benchmark_coding.py     measures the upcoding check over many synthetic samples
@@ -355,15 +484,24 @@ render.yaml        Render Blueprint
 
 ## Known limitations
 
-- **Reference prices are placeholders.** Only two items have one (hip/knee implant and streptokinase);
-  claims with any other top-up are skipped and counted. A supervisor can add prices on the reference
+- **Reference prices are placeholders.** Only three items have one (hip/knee implant, streptokinase and
+  deferiprone); claims with any other top-up are skipped and counted. Deferiprone (`DD02`) was added for the
+  thalassaemia example and is seeded into existing databases unless a supervisor has deleted it. A supervisor can add prices on the reference
   price page, and a change applies to files uploaded afterwards. Production use needs prices from
   e-Katalog LKPP and e-Fornas.
 - **File layout** follows Petunjuk Teknis E-Klaim 5.1.1 (2017). Columns are matched by header name, but
   newer E-Klaim versions are untested, and encrypted TXT is not supported.
 - **Special CMG codes.** `RR04` follows the worked example in the Petunjuk Teknis. The Special Drug
   code (`DD01`) and the INA-CBG tariffs in the sample are illustrative.
-- **Repeat top-ups** are counted within one file, not across batches.
+- **Repeat top-ups across files** are compared only with batches still stored in the same workspace, and
+  only with the claims that were screened (above `MAX_CLAIMS` the rest of a file is not stored). A deleted
+  batch is no longer compared; a claim already flagged against it keeps its flag and says the earlier batch
+  is gone. A file that re-sends at least half of an earlier batch's SEPs is treated as a re-export, so
+  re-billing on that scale is not flagged by this check. Only the anomaly features of one file feed the model.
+- **Overlapping stays** are found against every claim of the same card in the uploaded file, but against
+  earlier batches only for their top-up claims, because claims without a top-up are not stored. An E-Klaim
+  export usually comes from one hospital, so overlaps between hospitals show up only when files from several
+  hospitals reach the same workspace. Readmissions are context and do not feed the model.
 - **Both top-ups on one claim.** A claim with a Special Prosthesis and a Special Drug top-up is screened on
   the prosthesis only.
 - **Large files.** Above `MAX_CLAIMS` only the first rows of the file are screened (the page says so), so a

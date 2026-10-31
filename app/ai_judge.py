@@ -43,6 +43,13 @@ Rules:
 - Base the opinion only on the fields given. Do not invent clinical details.
 - A hospital bill below the reference price is the strongest signal, but referral hospitals,
   catalogue purchases below list price and staged operations are legitimate causes.
+- Judge repeats against repeats_expected_for_primary_dx, the number of other visits a patient with the
+  same primary diagnosis normally has in that window (national BPJS sample data). Repeats at or below it,
+  as in thalassaemia or haemophilia, are expected care, not repeat billing.
+- overlapping_stays_same_card above zero means the same patient has another claim whose stay overlaps this
+  one; a patient cannot be in two beds at once, so at least one claim is wrong. Ask for the admission and
+  discharge records of both. A readmission within 7 days with the same diagnosis is context: compare it with
+  national_readmit_rate_primary_dx before reading it as one episode split in two.
 - When the examples conflict with your own reading, follow the team's past decisions and say so.
 - Prefer "docs_requested" over a confident answer when the evidence is thin.
 - Write the summary and reasons in Bahasa Indonesia, short and plain, for a verifier."""
@@ -93,6 +100,11 @@ def describe(c: Claim) -> dict:
             "tarif_rs_over_reference": round(c.cover, 3),
             "los_over_median": round(c.los_ratio, 3),
             "same_topup_same_card_90d": c.repeat_n,
+            "repeats_expected_for_primary_dx": c.repeat_exp or 0.0,
+            "national_median_los_primary_dx": c.los_nat,
+            "overlapping_stays_same_card": c.overlap_n or 0,
+            "readmitted_days_after_same_dx_stay": c.readmit_days,
+            "national_readmit_rate_primary_dx": c.readmit_rate,
             "hospital_topup_volume_over_peers": round(c.vol_ratio, 3),
         },
         "anomaly_model": {
